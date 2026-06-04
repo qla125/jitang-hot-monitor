@@ -1,59 +1,53 @@
 import { useState, useEffect } from 'react'
-import { ArrowLeft, Save, Eye, EyeOff, Loader2, CheckCircle2 } from 'lucide-react'
+import { ArrowLeft, Save, Eye, EyeOff, Loader2, CheckCircle2, Settings as SettingsIcon } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { settingsApi } from '../api'
-import type { Settings } from '../types'
-import clsx from 'clsx'
+import { settingsApi } from '@/api'
+import type { Settings } from '@/types'
+import { cn } from '@/lib/utils'
+import { BackgroundGrid } from '@/components/aceternity/background-grid'
 
 const MODELS = [
-  { value: 'deepseek/deepseek-chat', label: 'DeepSeek Chat (推荐，性价比最高)' },
-  { value: 'google/gemini-flash-2.0', label: 'Gemini Flash 2.0 (速度快)' },
-  { value: 'anthropic/claude-haiku-4-5', label: 'Claude Haiku 4.5 (准确度高)' },
+  { value: 'deepseek/deepseek-chat', label: 'DeepSeek Chat（推荐）' },
+  { value: 'google/gemini-flash-2.0', label: 'Gemini Flash 2.0' },
+  { value: 'anthropic/claude-haiku-4-5', label: 'Claude Haiku 4.5' },
   { value: 'openai/gpt-4o-mini', label: 'GPT-4o Mini' },
 ]
 
-function Field({
-  label,
-  type = 'text',
-  value,
-  onChange,
-  placeholder,
-  hint,
-  showToggle,
-}: {
-  label: string
-  type?: string
-  value: string
-  onChange: (v: string) => void
-  placeholder?: string
-  hint?: string
-  showToggle?: boolean
+function Field({ label, value, onChange, placeholder, hint, showToggle, type = 'text' }: {
+  label: string; value: string; onChange: (v: string) => void
+  placeholder?: string; hint?: string; showToggle?: boolean; type?: string
 }) {
   const [show, setShow] = useState(false)
-  const inputType = showToggle ? (show ? 'text' : 'password') : type
-
   return (
-    <div>
-      <label className="block text-xs font-mono text-ink-3 mb-1.5">{label}</label>
+    <div className="flex flex-col gap-1.5">
+      <label className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">{label}</label>
       <div className="relative">
         <input
-          type={inputType}
+          type={showToggle ? (show ? 'text' : 'password') : type}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={e => onChange(e.target.value)}
           placeholder={placeholder}
-          className="w-full bg-elevated border border-ink-4/30 rounded-lg px-3 py-2.5 text-sm text-ink-1 placeholder-ink-4 focus:outline-none focus:border-primary/50 transition-colors pr-10"
+          className="w-full bg-slate-900 border border-white/[0.08] rounded-lg px-3 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500/50 transition-colors pr-10 font-mono"
         />
         {showToggle && (
-          <button
-            type="button"
-            onClick={() => setShow((v) => !v)}
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-4 hover:text-ink-2"
-          >
+          <button type="button" onClick={() => setShow(v => !v)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors">
             {show ? <EyeOff size={14} /> : <Eye size={14} />}
           </button>
         )}
       </div>
-      {hint && <p className="text-xs text-ink-4 mt-1">{hint}</p>}
+      {hint && <p className="text-[11px] text-slate-600">{hint}</p>}
+    </div>
+  )
+}
+
+function Section({ title, icon, children }: { title: string; icon: string; children: React.ReactNode }) {
+  return (
+    <div className="glass-card rounded-xl p-5 border-white/[0.06]">
+      <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200 mb-4">
+        <span>{icon}</span>{title}
+      </h2>
+      <div className="flex flex-col gap-4">{children}</div>
     </div>
   )
 }
@@ -64,220 +58,91 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
-  useEffect(() => {
-    settingsApi.get().then((res) => {
-      setSettings(res.data)
-      setLoading(false)
-    })
-  }, [])
+  useEffect(() => { settingsApi.get().then(r => { setSettings(r.data); setLoading(false) }) }, [])
 
-  const set = (key: keyof Settings) => (value: string) =>
-    setSettings((prev) => ({ ...prev, [key]: value }))
+  const set = (key: keyof Settings) => (value: string) => setSettings(p => ({ ...p, [key]: value }))
 
   const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setSaving(true)
-    try {
-      await settingsApi.save(settings)
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2500)
-    } finally {
-      setSaving(false)
-    }
+    e.preventDefault(); setSaving(true)
+    try { await settingsApi.save(settings); setSaved(true); setTimeout(() => setSaved(false), 2500) }
+    finally { setSaving(false) }
   }
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-void flex items-center justify-center">
-        <Loader2 size={24} className="text-primary animate-spin" />
-      </div>
-    )
-  }
+  if (loading) return (
+    <div className="h-screen bg-[#030712] flex items-center justify-center">
+      <Loader2 size={20} className="text-indigo-400 animate-spin" />
+    </div>
+  )
 
   return (
-    <div className="min-h-screen bg-void font-body text-ink-1">
-      <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute top-1/4 right-1/4 w-80 h-80 rounded-full bg-accent/4 blur-3xl" />
-      </div>
-
-      <div className="relative z-10 max-w-2xl mx-auto px-6 py-8">
-        {/* Back */}
-        <Link
-          to="/"
-          className="inline-flex items-center gap-2 text-sm text-ink-3 hover:text-primary transition-colors mb-8"
-        >
-          <ArrowLeft size={16} />
-          返回雷达
-        </Link>
-
+    <div className="min-h-screen bg-[#030712] font-body text-slate-100 relative">
+      <BackgroundGrid />
+      <div className="relative z-10 max-w-xl mx-auto px-6 py-8">
         <div className="flex items-center gap-3 mb-8">
-          <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
-            <span className="text-xl">⚙️</span>
-          </div>
-          <div>
-            <h1 className="font-display text-lg text-primary font-bold">系统配置</h1>
-            <p className="text-ink-4 text-xs font-mono">配置 AI 服务 和 通知渠道</p>
+          <Link to="/" className="p-2 text-slate-500 hover:text-slate-200 hover:bg-white/[0.04] rounded-lg transition-all">
+            <ArrowLeft size={16} />
+          </Link>
+          <div className="flex items-center gap-2.5">
+            <SettingsIcon size={16} className="text-indigo-400" />
+            <h1 className="font-display font-bold text-base text-slate-100">系统配置</h1>
           </div>
         </div>
 
-        <form onSubmit={handleSave} className="flex flex-col gap-6">
-
-          {/* AI 配置 */}
-          <section className="bg-surface border border-elevated rounded-2xl p-5">
-            <h2 className="text-sm font-semibold text-ink-1 mb-4 flex items-center gap-2">
-              <span>🤖</span> AI 服务（OpenRouter）
-            </h2>
-            <div className="flex flex-col gap-4">
-              <Field
-                label="OpenRouter API Key"
-                value={settings.openrouter_api_key || ''}
-                onChange={set('openrouter_api_key')}
-                placeholder="sk-or-v1-..."
-                showToggle
-                hint="在 openrouter.ai 注册后获取 API Key"
-              />
-              <div>
-                <label className="block text-xs font-mono text-ink-3 mb-1.5">使用模型</label>
-                <select
-                  value={settings.openrouter_model || 'deepseek/deepseek-chat'}
-                  onChange={(e) => set('openrouter_model')(e.target.value)}
-                  className="w-full bg-elevated border border-ink-4/30 rounded-lg px-3 py-2.5 text-sm text-ink-1 focus:outline-none focus:border-primary/50 transition-colors"
-                >
-                  {MODELS.map((m) => (
-                    <option key={m.value} value={m.value}>{m.label}</option>
-                  ))}
-                </select>
-              </div>
+        <form onSubmit={handleSave} className="flex flex-col gap-4">
+          <Section title="AI 服务 · OpenRouter" icon="🤖">
+            <Field label="API Key" value={settings.openrouter_api_key || ''} onChange={set('openrouter_api_key')}
+              placeholder="sk-or-v1-..." showToggle hint="从 openrouter.ai 获取" />
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">使用模型</label>
+              <select value={settings.openrouter_model || 'deepseek/deepseek-chat'} onChange={e => set('openrouter_model')(e.target.value)}
+                className="bg-slate-900 border border-white/[0.08] rounded-lg px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500/50 transition-colors font-mono">
+                {MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
             </div>
-          </section>
+          </Section>
 
-          {/* 抓取间隔 */}
-          <section className="bg-surface border border-elevated rounded-2xl p-5">
-            <h2 className="text-sm font-semibold text-ink-1 mb-4 flex items-center gap-2">
-              <span>⏱️</span> 抓取间隔
-            </h2>
-            <div>
-              <label className="block text-xs font-mono text-ink-3 mb-1.5">每隔几分钟抓取一次</label>
-              <select
-                value={settings.check_interval || '30'}
-                onChange={(e) => set('check_interval')(e.target.value)}
-                className="w-full bg-elevated border border-ink-4/30 rounded-lg px-3 py-2.5 text-sm text-ink-1 focus:outline-none focus:border-primary/50"
-              >
+          <Section title="抓取间隔" icon="⏱">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">每隔几分钟自动抓取</label>
+              <select value={settings.check_interval || '30'} onChange={e => set('check_interval')(e.target.value)}
+                className="bg-slate-900 border border-white/[0.08] rounded-lg px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500/50 transition-colors font-mono">
                 <option value="15">15 分钟</option>
                 <option value="30">30 分钟（推荐）</option>
                 <option value="60">60 分钟</option>
-                <option value="120">120 分钟</option>
               </select>
-              <p className="text-xs text-ink-4 mt-1">注意：修改后需要重启服务才能生效</p>
+              <p className="text-[11px] text-slate-600">修改后需重启后端服务生效</p>
             </div>
-          </section>
+          </Section>
 
-          {/* Twitter/X 监控 */}
-          <section className="bg-surface border border-elevated rounded-2xl p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-semibold text-ink-1 flex items-center gap-2">
-                <span>🐦</span> Twitter/X 监控
-                <span className="text-xs bg-accent/15 text-accent px-2 py-0.5 rounded font-mono border border-accent/20">
-                  需 Basic 付费版
-                </span>
-              </h2>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <span className="text-xs text-ink-3 font-mono">
-                  {settings.twitter_enabled === 'true' ? '已启用' : '已禁用'}
-                </span>
-                <div
-                  onClick={() => set('twitter_enabled')(settings.twitter_enabled === 'true' ? 'false' : 'true')}
-                  className={clsx(
-                    'w-10 h-6 rounded-full border-2 transition-all cursor-pointer relative',
-                    settings.twitter_enabled === 'true'
-                      ? 'bg-accent/20 border-accent/60'
-                      : 'bg-elevated border-ink-4/30'
-                  )}
-                >
-                  <div
-                    className={clsx(
-                      'absolute top-0.5 w-4 h-4 rounded-full transition-all',
-                      settings.twitter_enabled === 'true' ? 'left-[18px] bg-accent' : 'left-0.5 bg-ink-4'
-                    )}
-                  />
-                </div>
-              </label>
+          <Section title="邮件通知 · SMTP" icon="📧">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-slate-300">启用邮件通知</span>
+              <button type="button"
+                onClick={() => set('email_enabled')(settings.email_enabled === 'true' ? 'false' : 'true')}
+                className={cn('relative w-10 h-5.5 rounded-full border-2 transition-all',
+                  settings.email_enabled === 'true' ? 'bg-indigo-500/20 border-indigo-500/60' : 'bg-slate-800 border-slate-700')}>
+                <div className={cn('absolute top-0.5 w-4 h-4 rounded-full transition-all',
+                  settings.email_enabled === 'true' ? 'left-[18px] bg-indigo-400' : 'left-0.5 bg-slate-500')} />
+              </button>
             </div>
-            <div className="flex flex-col gap-3">
-              <Field
-                label="Bearer Token"
-                value={settings.twitter_bearer_token || ''}
-                onChange={set('twitter_bearer_token')}
-                placeholder="AAAA..."
-                showToggle
-                hint="在 developer.x.com 项目设置中获取 Bearer Token（需要 Basic 及以上访问级别）"
-              />
-              {settings.twitter_enabled === 'true' && !settings.twitter_bearer_token && (
-                <p className="text-xs text-alert bg-alert/10 border border-alert/20 rounded-lg px-3 py-2">
-                  ⚠️ 请先填入 Bearer Token 再启用 Twitter 监控
-                </p>
-              )}
-              <p className="text-xs text-ink-4">
-                启用后，将搜索你配置的关键词相关推文，每次抓取最多 20 条。
-              </p>
-            </div>
-          </section>
-
-          {/* 邮件通知 */}
-          <section className="bg-surface border border-elevated rounded-2xl p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-semibold text-ink-1 flex items-center gap-2">
-                <span>📧</span> 邮件通知
-              </h2>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <span className="text-xs text-ink-3 font-mono">
-                  {settings.email_enabled === 'true' ? '已启用' : '已禁用'}
-                </span>
-                <div
-                  onClick={() => set('email_enabled')(settings.email_enabled === 'true' ? 'false' : 'true')}
-                  className={clsx(
-                    'w-10 h-6 rounded-full border-2 transition-all cursor-pointer relative',
-                    settings.email_enabled === 'true'
-                      ? 'bg-primary/20 border-primary/60'
-                      : 'bg-elevated border-ink-4/30'
-                  )}
-                >
-                  <div
-                    className={clsx(
-                      'absolute top-0.5 w-4 h-4 rounded-full transition-all',
-                      settings.email_enabled === 'true' ? 'left-[18px] bg-primary' : 'left-0.5 bg-ink-4'
-                    )}
-                  />
-                </div>
-              </label>
-            </div>
-
             {settings.email_enabled === 'true' && (
-              <div className="flex flex-col gap-4">
+              <>
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="SMTP 服务器" value={settings.email_smtp_host || ''} onChange={set('email_smtp_host')} placeholder="smtp.gmail.com" />
                   <Field label="端口" value={settings.email_smtp_port || '587'} onChange={set('email_smtp_port')} placeholder="587" />
                 </div>
                 <Field label="邮件账号" value={settings.email_smtp_user || ''} onChange={set('email_smtp_user')} placeholder="your@gmail.com" />
-                <Field label="邮件密码 / 应用专用密码" value={settings.email_smtp_pass || ''} onChange={set('email_smtp_pass')} showToggle hint="Gmail 用户请使用应用专用密码（非账号密码）" />
-                <Field label="收件人邮箱" value={settings.email_to || ''} onChange={set('email_to')} placeholder="notify@example.com" />
-              </div>
+                <Field label="密码 / 应用专用密码" value={settings.email_smtp_pass || ''} onChange={set('email_smtp_pass')} showToggle hint="Gmail 请使用应用专用密码" />
+                <Field label="收件人" value={settings.email_to || ''} onChange={set('email_to')} placeholder="notify@example.com" />
+              </>
             )}
-          </section>
+          </Section>
 
-          {/* Save */}
-          <button
-            type="submit"
-            disabled={saving}
-            className="flex items-center justify-center gap-2 w-full bg-primary/10 hover:bg-primary/20 border border-primary/40 text-primary font-medium py-3 rounded-xl transition-all disabled:opacity-50"
-          >
-            {saving ? (
-              <><Loader2 size={16} className="animate-spin" /> 保存中...</>
-            ) : saved ? (
-              <><CheckCircle2 size={16} /> 已保存</>
-            ) : (
-              <><Save size={16} /> 保存配置</>
-            )}
+          <button type="submit" disabled={saving}
+            className="flex items-center justify-center gap-2 w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium py-3 rounded-xl transition-all text-sm">
+            {saving ? <><Loader2 size={15} className="animate-spin" /> 保存中...</>
+             : saved ? <><CheckCircle2 size={15} /> 已保存</>
+             : <><Save size={15} /> 保存配置</>}
           </button>
         </form>
       </div>

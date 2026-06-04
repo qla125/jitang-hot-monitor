@@ -3,45 +3,42 @@
 @tailwind utilities;
 
 @layer base {
-  * {
-    box-sizing: border-box;
-  }
+  *, *::before, *::after { box-sizing: border-box; }
 
-  html {
-    font-family: 'Inter', sans-serif;
-  }
+  html { font-family: 'Inter', sans-serif; }
 
   body {
-    background-color: #050810;
-    color: #e8eaf6;
+    background-color: #030712;
+    color: #f1f5f9;
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
-  ::-webkit-scrollbar {
-    width: 4px;
-    height: 4px;
-  }
-
-  ::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  ::-webkit-scrollbar-thumb {
-    background: rgba(0, 245, 212, 0.2);
-    border-radius: 2px;
-  }
-
-  ::-webkit-scrollbar-thumb:hover {
-    background: rgba(0, 245, 212, 0.4);
-  }
+  ::-webkit-scrollbar { width: 3px; height: 3px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(99,102,241,0.25); border-radius: 2px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(99,102,241,0.45); }
+  * { scrollbar-width: thin; scrollbar-color: rgba(99,102,241,0.25) transparent; }
 }
 
 @layer utilities {
-  .scrollbar-hide {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
+  .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+  .scrollbar-hide::-webkit-scrollbar { display: none; }
+
+  .glass {
+    background: rgba(15, 23, 42, 0.6);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
   }
-  .scrollbar-hide::-webkit-scrollbar {
-    display: none;
+
+  .glass-card {
+    background: rgba(15, 23, 42, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(8px);
   }
+
+  .score-10, .score-9  { color: #fbbf24; }
+  .score-8,  .score-7  { color: #818cf8; }
+  .score-6,  .score-5  { color: #94a3b8; }
+  .score-low           { color: #475569; }
 }

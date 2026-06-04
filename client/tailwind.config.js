@@ -3,45 +3,52 @@ export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
-      colors: {
-        void: '#050810',
-        surface: '#0a0e1a',
-        elevated: '#0f1525',
-        primary: {
-          DEFAULT: '#00f5d4',
-          dim: 'rgba(0,245,212,0.15)',
-        },
-        accent: '#7f5af0',
-        alert: '#f5a623',
-        danger: '#ff4d4f',
-        ink: {
-          1: '#e8eaf6',
-          2: '#b0b8d4',
-          3: '#7c8db5',
-          4: '#4a5568',
-        },
-      },
       fontFamily: {
-        display: ['Orbitron', 'sans-serif'],
+        display: ['"Space Grotesk"', 'sans-serif'],
         body: ['Inter', 'sans-serif'],
         mono: ['"JetBrains Mono"', 'monospace'],
       },
-      keyframes: {
-        sweep: {
-          '0%': { opacity: '1' },
-          '100%': { opacity: '0' },
+      colors: {
+        brand: {
+          DEFAULT: '#6366f1',
+          light: '#818cf8',
+          dark: '#4f46e5',
         },
-        blipPulse: {
-          '0%, 100%': { transform: 'scale(1)', opacity: '1' },
-          '50%': { transform: 'scale(1.8)', opacity: '0.4' },
+        alert: {
+          DEFAULT: '#f59e0b',
+          light: '#fbbf24',
+          dark: '#d97706',
         },
+        live: '#10b981',
       },
       animation: {
-        blip: 'blipPulse 1.5s ease-in-out infinite',
+        'pulse-dot': 'pulseDot 2s ease-in-out infinite',
+        'shimmer': 'shimmer 2s linear infinite',
+        'fade-in': 'fadeIn 0.3s ease-out',
+        'slide-up': 'slideUp 0.3s ease-out',
+      },
+      keyframes: {
+        pulseDot: {
+          '0%, 100%': { opacity: '1', transform: 'scale(1)' },
+          '50%': { opacity: '0.5', transform: 'scale(0.85)' },
+        },
+        shimmer: {
+          '0%': { backgroundPosition: '-200% 0' },
+          '100%': { backgroundPosition: '200% 0' },
+        },
+        fadeIn: {
+          from: { opacity: '0' },
+          to: { opacity: '1' },
+        },
+        slideUp: {
+          from: { opacity: '0', transform: 'translateY(8px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
       },
       boxShadow: {
-        glow: '0 0 20px rgba(0,245,212,0.25)',
-        'glow-alert': '0 0 20px rgba(245,166,35,0.3)',
+        'glow-sm': '0 0 12px rgba(99,102,241,0.2)',
+        glow: '0 0 24px rgba(99,102,241,0.25)',
+        'glow-alert': '0 0 20px rgba(245,158,11,0.25)',
       },
     },
   },

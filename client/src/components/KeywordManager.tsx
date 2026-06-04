@@ -1,33 +1,24 @@
 import { useState } from 'react'
 import { Plus, Trash2, ToggleLeft, ToggleRight, Loader2 } from 'lucide-react'
-import { keywordsApi } from '../api'
-import type { Keyword } from '../types'
-import clsx from 'clsx'
+import { keywordsApi } from '@/api'
+import type { Keyword } from '@/types'
+import { cn } from '@/lib/utils'
 
-interface Props {
-  keywords: Keyword[]
-  onRefresh: () => void
-}
+interface Props { keywords: Keyword[]; onRefresh: () => void }
 
 export default function KeywordManager({ keywords, onRefresh }: Props) {
   const [input, setInput] = useState('')
-  const [desc, setDesc] = useState('')
   const [loading, setLoading] = useState(false)
-  const [showForm, setShowForm] = useState(false)
+  const [showInput, setShowInput] = useState(false)
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!input.trim()) return
     setLoading(true)
     try {
-      await keywordsApi.create({ keyword: input.trim(), description: desc.trim() })
-      setInput('')
-      setDesc('')
-      setShowForm(false)
-      onRefresh()
-    } finally {
-      setLoading(false)
-    }
+      await keywordsApi.create({ keyword: input.trim() })
+      setInput(''); setShowInput(false); onRefresh()
+    } finally { setLoading(false) }
   }
 
   const handleToggle = async (kw: Keyword) => {
@@ -36,103 +27,66 @@ export default function KeywordManager({ keywords, onRefresh }: Props) {
   }
 
   const handleDelete = async (id: number) => {
-    if (!confirm('确认删除该关键词？')) return
-    await keywordsApi.remove(id)
-    onRefresh()
+    await keywordsApi.remove(id); onRefresh()
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-ink-2 text-xs font-mono uppercase tracking-widest">关键词监控</h2>
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[10px] font-mono text-slate-500 uppercase tracking-widest">监控词</span>
         <button
-          onClick={() => setShowForm((v) => !v)}
-          className={clsx(
-            'flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border transition-all',
-            showForm
-              ? 'bg-primary/10 border-primary/30 text-primary'
-              : 'border-elevated text-ink-3 hover:border-primary/30 hover:text-primary'
-          )}
+          onClick={() => setShowInput(v => !v)}
+          className="flex items-center gap-1 text-[11px] text-indigo-400 hover:text-indigo-300 transition-colors"
         >
-          <Plus size={12} />
-          添加
+          <Plus size={11} /> 添加
         </button>
       </div>
 
-      {showForm && (
-        <form onSubmit={handleAdd} className="flex flex-col gap-2 p-3 bg-elevated rounded-xl border border-primary/20">
+      {showInput && (
+        <form onSubmit={handleAdd} className="flex gap-1.5 animate-slide-up">
           <input
             value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="关键词，如：GPT-5 发布"
-            className="bg-surface border border-ink-4/30 rounded-lg px-3 py-2 text-sm text-ink-1 placeholder-ink-4 focus:outline-none focus:border-primary/50 transition-colors"
+            onChange={e => setInput(e.target.value)}
+            placeholder="输入关键词..."
             autoFocus
+            className="flex-1 bg-slate-900 border border-white/[0.08] rounded-md px-2.5 py-1.5 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500/50 transition-colors"
           />
-          <input
-            value={desc}
-            onChange={(e) => setDesc(e.target.value)}
-            placeholder="备注（可选）"
-            className="bg-surface border border-ink-4/30 rounded-lg px-3 py-2 text-xs text-ink-1 placeholder-ink-4 focus:outline-none focus:border-primary/30 transition-colors"
-          />
-          <div className="flex gap-2">
-            <button
-              type="submit"
-              disabled={loading || !input.trim()}
-              className="flex-1 flex items-center justify-center gap-1.5 bg-primary/10 hover:bg-primary/20 border border-primary/30 text-primary text-sm py-2 rounded-lg transition-all disabled:opacity-50"
-            >
-              {loading ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-              确认添加
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowForm(false)}
-              className="px-3 py-2 text-ink-3 text-sm rounded-lg border border-elevated hover:border-ink-4/50 transition-all"
-            >
-              取消
-            </button>
-          </div>
+          <button
+            type="submit"
+            disabled={loading || !input.trim()}
+            className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-md text-xs text-white transition-colors"
+          >
+            {loading ? <Loader2 size={11} className="animate-spin" /> : '确认'}
+          </button>
         </form>
       )}
 
       {keywords.length === 0 ? (
-        <p className="text-ink-4 text-xs text-center py-4 font-mono">暂无监控关键词</p>
+        <p className="text-slate-600 text-xs py-3 text-center font-mono">暂无监控词</p>
       ) : (
-        <div className="flex flex-col gap-1.5">
-          {keywords.map((kw) => (
+        <div className="flex flex-col gap-1">
+          {keywords.map(kw => (
             <div
               key={kw.id}
-              className={clsx(
-                'flex items-center gap-2 px-3 py-2.5 rounded-lg border transition-all',
+              className={cn(
+                'group flex items-center gap-2 px-2.5 py-2 rounded-lg border transition-all',
                 kw.active
-                  ? 'bg-surface border-primary/15 hover:border-primary/30'
-                  : 'bg-elevated border-elevated opacity-50 hover:opacity-70'
+                  ? 'bg-indigo-500/5 border-indigo-500/15 hover:border-indigo-500/30'
+                  : 'bg-slate-900/30 border-white/[0.04] opacity-50'
               )}
             >
-              <div className="flex-1 min-w-0">
-                <p className={clsx('text-sm font-medium truncate', kw.active ? 'text-ink-1' : 'text-ink-3')}>
-                  {kw.keyword}
-                </p>
-                {kw.description && (
-                  <p className="text-xs text-ink-4 truncate">{kw.description}</p>
-                )}
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <button
-                  onClick={() => handleToggle(kw)}
-                  className="text-ink-3 hover:text-primary transition-colors p-1"
-                  title={kw.active ? '暂停监控' : '启动监控'}
-                >
-                  {kw.active ? (
-                    <ToggleRight size={18} className="text-primary" />
-                  ) : (
-                    <ToggleLeft size={18} />
-                  )}
+              <div
+                className={cn('w-1.5 h-1.5 rounded-full shrink-0 animate-pulse-dot', kw.active ? 'bg-live' : 'bg-slate-600')}
+              />
+              <span className={cn('flex-1 text-xs font-mono truncate', kw.active ? 'text-slate-200' : 'text-slate-500')}>
+                {kw.keyword}
+              </span>
+              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onClick={() => handleToggle(kw)} className="p-1 text-slate-500 hover:text-indigo-400 transition-colors">
+                  {kw.active ? <ToggleRight size={13} className="text-live" /> : <ToggleLeft size={13} />}
                 </button>
-                <button
-                  onClick={() => handleDelete(kw.id)}
-                  className="text-ink-4 hover:text-danger transition-colors p-1"
-                >
-                  <Trash2 size={14} />
+                <button onClick={() => handleDelete(kw.id)} className="p-1 text-slate-600 hover:text-red-400 transition-colors">
+                  <Trash2 size={11} />
                 </button>
               </div>
             </div>
