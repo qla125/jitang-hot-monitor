@@ -1,0 +1,32 @@
+import axios from 'axios'
+import type { Alert, HotTopic, Keyword, Settings } from '../types'
+
+const api = axios.create({ baseURL: '/api' })
+
+export const keywordsApi = {
+  getAll: () => api.get<Keyword[]>('/keywords'),
+  create: (data: { keyword: string; description?: string }) =>
+    api.post<Keyword>('/keywords', data),
+  update: (id: number, data: Partial<Keyword>) =>
+    api.put<Keyword>(`/keywords/${id}`, data),
+  remove: (id: number) => api.delete(`/keywords/${id}`),
+}
+
+export const topicsApi = {
+  getAll: (hours = 48) =>
+    api.get<HotTopic[]>('/hot-topics', { params: { hours } }),
+  refresh: () => api.post('/hot-topics/refresh'),
+  searchKeywords: () => api.post<{ message: string; keywords: string[] }>('/hot-topics/search-keywords'),
+}
+
+export const alertsApi = {
+  getAll: () =>
+    api.get<{ alerts: Alert[]; unreadCount: number }>('/alerts'),
+  markRead: (id: number) => api.put(`/alerts/${id}/read`),
+  markAllRead: () => api.put('/alerts/read-all'),
+}
+
+export const settingsApi = {
+  get: () => api.get<Settings>('/settings'),
+  save: (data: Partial<Settings>) => api.put('/settings', data),
+}

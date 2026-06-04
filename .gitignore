@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build output
+dist/
+**/dist/
+
+# Environment (contains API keys)
+server/.env
+.env
+.env.local
+
+# Claude Code local config (contains API keys)
+.claude/
+
+# Database
+data/
+**/data/*.db
+**/data/*.db-shm
+**/data/*.db-wal
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/
