@@ -4,7 +4,6 @@ import type { SSEAlert } from '@/types'
 import { cn } from '@/lib/utils'
 
 interface Toast extends SSEAlert { id: number; visible: boolean }
-
 let counter = 0
 
 export default function AlertBanner({ alerts }: { alerts: SSEAlert[] }) {
@@ -29,40 +28,34 @@ export default function AlertBanner({ alerts }: { alerts: SSEAlert[] }) {
         <div
           key={t.id}
           className={cn(
-            'pointer-events-auto w-72 glass-card rounded-xl border-amber-400/30 shadow-glow-alert overflow-hidden transition-all duration-300',
+            'pointer-events-auto w-72 bg-white rounded-xl shadow-glow-clay border border-clay-400/20 overflow-hidden transition-all duration-300',
             t.visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'
           )}
         >
-          {/* amber top bar */}
-          <div className="h-0.5 w-full bg-gradient-to-r from-amber-500 to-amber-300" />
-
-          <div className="p-3.5">
+          <div className="h-0.5 w-full bg-gradient-to-r from-clay-400 to-clay-500/60" />
+          <div className="p-4">
             <div className="flex items-center gap-2 mb-2">
-              <Zap size={13} className="text-amber-400 shrink-0" />
-              <span className="text-amber-400 text-xs font-mono font-semibold">关键词命中</span>
-              <span className="ml-auto text-[10px] font-mono bg-amber-400/10 text-amber-400 border border-amber-400/20 px-1.5 py-0.5 rounded">
+              <Zap size={13} className="text-clay-500 shrink-0" />
+              <span className="text-clay-600 text-xs font-mono font-semibold">关键词命中</span>
+              <span className="ml-auto text-[10px] font-mono bg-clay-400/10 text-clay-500 border border-clay-400/20 px-1.5 py-0.5 rounded-md">
                 {(t.confidence * 100).toFixed(0)}%
               </span>
               <button
                 onClick={() => setToasts(p => p.map(x => x.id === t.id ? { ...x, visible: false } : x))}
-                className="text-slate-500 hover:text-slate-300 transition-colors"
+                className="text-matcha-300 hover:text-matcha-600 transition-colors"
               >
                 <X size={12} />
               </button>
             </div>
-
-            <p className="text-[11px] text-slate-400 mb-1 font-mono">
-              「<span className="text-amber-300">{t.keyword}</span>」
+            <p className="text-[11px] text-matcha-400 mb-1 font-mono">
+              「<span className="text-clay-500 font-medium">{t.keyword}</span>」
             </p>
-            <p className="text-slate-100 text-sm font-medium leading-snug line-clamp-2 mb-2.5">
+            <p className="text-matcha-900 text-sm font-medium leading-snug line-clamp-2 mb-3">
               {t.title}
             </p>
-
             <a
-              href={t.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-[11px] text-indigo-400 hover:text-indigo-300 transition-colors"
+              href={t.url} target="_blank" rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-[11px] text-matcha-500 hover:text-matcha-700 font-medium transition-colors"
             >
               查看原文 <ExternalLink size={10} />
             </a>

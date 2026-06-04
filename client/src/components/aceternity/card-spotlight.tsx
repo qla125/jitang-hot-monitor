@@ -9,19 +9,19 @@ interface CardSpotlightProps extends React.HTMLAttributes<HTMLDivElement> {
 
 export function CardSpotlight({
   children,
-  radius = 400,
-  color = 'rgba(99,102,241,0.12)',
+  radius = 380,
+  color = 'rgba(122,158,120,0.08)',
   className,
   ...props
 }: CardSpotlightProps) {
   const divRef = useRef<HTMLDivElement>(null)
-  const [position, setPosition] = useState({ x: 0, y: 0 })
+  const [pos, setPos] = useState({ x: 0, y: 0 })
   const [opacity, setOpacity] = useState(0)
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!divRef.current) return
     const rect = divRef.current.getBoundingClientRect()
-    setPosition({ x: e.clientX - rect.left, y: e.clientY - rect.top })
+    setPos({ x: e.clientX - rect.left, y: e.clientY - rect.top })
   }
 
   return (
@@ -37,7 +37,7 @@ export function CardSpotlight({
         className="pointer-events-none absolute inset-0 transition-opacity duration-300"
         style={{
           opacity,
-          background: `radial-gradient(${radius}px circle at ${position.x}px ${position.y}px, ${color}, transparent 70%)`,
+          background: `radial-gradient(${radius}px circle at ${pos.x}px ${pos.y}px, ${color}, transparent 65%)`,
         }}
       />
       {children}

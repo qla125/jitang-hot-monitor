@@ -4,41 +4,50 @@
 
 @layer base {
   *, *::before, *::after { box-sizing: border-box; }
-
   html { font-family: 'Inter', sans-serif; }
-
   body {
-    background-color: #030712;
-    color: #f1f5f9;
+    background-color: #f7f6f2;
+    color: #2a3320;
     -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
   }
 
-  ::-webkit-scrollbar { width: 3px; height: 3px; }
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: rgba(99,102,241,0.25); border-radius: 2px; }
-  ::-webkit-scrollbar-thumb:hover { background: rgba(99,102,241,0.45); }
-  * { scrollbar-width: thin; scrollbar-color: rgba(99,102,241,0.25) transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(122,158,120,0.25); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(122,158,120,0.45); }
+  * { scrollbar-width: thin; scrollbar-color: rgba(122,158,120,0.25) transparent; }
+}
+
+@layer components {
+  .card {
+    background: #ffffff;
+    border-radius: 0.75rem;
+    box-shadow: 0 1px 8px rgba(42,51,32,0.06), 0 0 0 1px rgba(122,158,120,0.08);
+  }
+
+  .card-hover {
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+  }
+  .card-hover:hover {
+    box-shadow: 0 4px 20px rgba(42,51,32,0.10), 0 0 0 1px rgba(122,158,120,0.18);
+    transform: translateY(-1px);
+  }
+
+  /* Sidebar glass panel */
+  .sidebar-panel {
+    background: rgba(255,255,255,0.75);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-right: 1px solid rgba(122,158,120,0.12);
+  }
 }
 
 @layer utilities {
   .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
   .scrollbar-hide::-webkit-scrollbar { display: none; }
 
-  .glass {
-    background: rgba(15, 23, 42, 0.6);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-  }
-
-  .glass-card {
-    background: rgba(15, 23, 42, 0.5);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    backdrop-filter: blur(8px);
-  }
-
-  .score-10, .score-9  { color: #fbbf24; }
-  .score-8,  .score-7  { color: #818cf8; }
-  .score-6,  .score-5  { color: #94a3b8; }
-  .score-low           { color: #475569; }
+  .text-matcha { color: #7a9e78; }
+  .text-clay   { color: #c4906a; }
+  .text-forest { color: #2a3320; }
+  .text-muted  { color: #9aab90; }
 }

@@ -5,83 +5,79 @@ import type { HotTopic, TopicCategory } from '@/types'
 
 interface Props { topic: HotTopic }
 
-const CATEGORY: Record<TopicCategory, { label: string; color: string }> = {
-  'model-release': { label: '模型', color: 'text-violet-400 bg-violet-400/10 border-violet-400/20' },
-  'tool-update':   { label: '工具', color: 'text-sky-400 bg-sky-400/10 border-sky-400/20' },
-  research:        { label: '研究', color: 'text-blue-400 bg-blue-400/10 border-blue-400/20' },
-  funding:         { label: '融资', color: 'text-amber-400 bg-amber-400/10 border-amber-400/20' },
-  discussion:      { label: '讨论', color: 'text-slate-400 bg-slate-400/10 border-slate-400/20' },
-  other:           { label: '资讯', color: 'text-slate-500 bg-slate-500/10 border-slate-500/20' },
+const CATEGORY: Record<TopicCategory, { label: string; dot: string }> = {
+  'model-release': { label: '模型发布', dot: 'bg-matcha-400' },
+  'tool-update':   { label: '工具更新', dot: 'bg-matcha-300' },
+  research:        { label: '研究论文', dot: 'bg-matcha-300' },
+  funding:         { label: '融资动态', dot: 'bg-clay-400' },
+  discussion:      { label: '社区讨论', dot: 'bg-matcha-200' },
+  other:           { label: '资讯',     dot: 'bg-cream-300' },
 }
 
-function ScoreDisplay({ score, isAlert }: { score: number; isAlert: boolean }) {
-  const color = isAlert
-    ? 'text-amber-400'
-    : score >= 8 ? 'text-indigo-400' : score >= 6 ? 'text-slate-300' : 'text-slate-500'
+function ScoreChip({ score, isAlert }: { score: number; isAlert: boolean }) {
+  const style = isAlert
+    ? 'text-clay-500 bg-clay-400/10 border-clay-400/25'
+    : score >= 8
+    ? 'text-matcha-600 bg-matcha-50 border-matcha-200'
+    : 'text-matcha-400 bg-cream-200 border-cream-300'
+
   return (
-    <div className={cn('font-mono font-bold tabular-nums leading-none', color)}>
-      <span className="text-2xl">{score}</span>
-      <span className="text-xs opacity-60">/10</span>
-    </div>
+    <span className={cn('inline-flex items-baseline gap-0.5 font-mono border rounded-md px-1.5 py-0.5', style)}>
+      <span className="text-base font-bold leading-none">{score}</span>
+      <span className="text-[9px] opacity-60">/10</span>
+    </span>
   )
 }
 
 export default function HotTopicCard({ topic }: Props) {
   const meta = CATEGORY[topic.category] || CATEGORY.other
   const isAlert = topic.alert_count > 0
-  const isHot = topic.score >= 8
 
   return (
     <a href={topic.url} target="_blank" rel="noopener noreferrer" className="block group">
       <CardSpotlight
+        color={isAlert ? 'rgba(196,144,106,0.07)' : 'rgba(122,158,120,0.07)'}
         className={cn(
-          'glass-card rounded-xl p-4 transition-all duration-200',
-          'hover:border-indigo-500/25 hover:shadow-glow-sm',
-          isAlert && 'border-l-2 border-l-amber-400/60 hover:border-l-amber-400',
-          isHot && !isAlert && 'border-indigo-500/15'
+          'card card-hover rounded-xl p-4',
+          isAlert && 'border-l-2 border-l-clay-400/50'
         )}
-        color={isAlert ? 'rgba(245,158,11,0.08)' : 'rgba(99,102,241,0.1)'}
       >
         <div className="flex items-start gap-3">
-          {/* Score */}
           <div className="shrink-0 pt-0.5">
-            <ScoreDisplay score={topic.score} isAlert={isAlert} />
+            <ScoreChip score={topic.score} isAlert={isAlert} />
           </div>
 
-          {/* Content */}
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1.5">
-              <span className={cn('text-[10px] font-mono px-1.5 py-0.5 rounded border', meta.color)}>
-                {meta.label}
-              </span>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', meta.dot)} />
+              <span className="text-[10px] font-mono text-matcha-400 tracking-wide">{meta.label}</span>
               {isAlert && (
-                <span className="text-[10px] font-mono text-amber-400 bg-amber-400/10 border border-amber-400/20 px-1.5 py-0.5 rounded">
+                <span className="text-[10px] font-mono text-clay-500 bg-clay-400/10 border border-clay-400/20 px-1.5 py-0.5 rounded-md">
                   ⚡ 命中
                 </span>
               )}
               <ExternalLink
                 size={11}
-                className="ml-auto text-slate-600 group-hover:text-slate-400 transition-colors shrink-0"
+                className="ml-auto text-matcha-200 group-hover:text-matcha-400 transition-colors shrink-0"
               />
             </div>
 
-            <h3 className="text-slate-100 font-medium text-sm leading-snug line-clamp-2 mb-1 group-hover:text-white transition-colors">
+            <h3 className="text-matcha-900 font-medium text-sm leading-snug line-clamp-2 mb-1.5 group-hover:text-matcha-700 transition-colors">
               {topic.title}
             </h3>
 
             {topic.summary && (
-              <p className="text-slate-400 text-xs leading-relaxed line-clamp-1 mb-2">
+              <p className="text-matcha-400 text-xs leading-relaxed line-clamp-1 mb-2">
                 {topic.summary}
               </p>
             )}
 
-            <div className="flex items-center gap-2 text-[11px] font-mono text-slate-600">
+            <div className="flex items-center gap-1.5 text-[10px] font-mono text-matcha-300">
               <span>{topic.source}</span>
-              <span className="w-1 h-1 rounded-full bg-slate-700" />
+              <span>·</span>
               <span>
                 {new Date(topic.created_at).toLocaleString('zh-CN', {
-                  month: 'numeric', day: 'numeric',
-                  hour: '2-digit', minute: '2-digit',
+                  month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
                 })}
               </span>
             </div>

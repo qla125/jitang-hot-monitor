@@ -14,7 +14,7 @@ export function MovingBorderButton({
   as: Component = 'button',
   containerClassName,
   borderClassName,
-  duration = 2500,
+  duration = 3000,
   className,
   ...otherProps
 }: {
@@ -29,7 +29,7 @@ export function MovingBorderButton({
 }) {
   return (
     <Component
-      className={cn('relative overflow-hidden bg-transparent p-[1px]', containerClassName)}
+      className={cn('relative overflow-hidden bg-transparent p-[1.5px]', containerClassName)}
       style={{ borderRadius }}
       {...otherProps}
     >
@@ -37,7 +37,7 @@ export function MovingBorderButton({
         <MovingBorder duration={duration} rx="30%" ry="30%">
           <div
             className={cn(
-              'h-16 w-16 bg-[radial-gradient(#6366f1_40%,transparent_60%)] opacity-90',
+              'h-14 w-14 bg-[radial-gradient(#7a9e78_40%,transparent_65%)] opacity-80',
               borderClassName
             )}
           />
@@ -45,7 +45,7 @@ export function MovingBorderButton({
       </div>
       <div
         className={cn(
-          'relative flex h-full w-full items-center justify-center border border-white/[0.08] bg-slate-900/90 antialiased backdrop-blur-sm',
+          'relative flex h-full w-full items-center justify-center border border-matcha-200 bg-white/90 antialiased backdrop-blur-sm',
           className
         )}
         style={{ borderRadius: `calc(${borderRadius} * 0.96)` }}
@@ -58,7 +58,7 @@ export function MovingBorderButton({
 
 export function MovingBorder({
   children,
-  duration = 2500,
+  duration = 3000,
   rx,
   ry,
   ...otherProps
@@ -75,8 +75,7 @@ export function MovingBorder({
   useAnimationFrame((time) => {
     const length = pathRef.current?.getTotalLength()
     if (length) {
-      const pxPerMs = length / duration
-      progress.set((time * pxPerMs) % length)
+      progress.set((time * (length / duration)) % length)
     }
   })
 
