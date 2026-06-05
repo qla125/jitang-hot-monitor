@@ -46,12 +46,12 @@ interface WeiboHit {
   publishedAt: string;
 }
 
-// 48 小时新鲜度硬过滤：有发布时间且超过 48h 的结果直接丢弃
-function isWithin48h(dateStr?: string): boolean {
+// 7 天新鲜度过滤：有发布时间且超过 7 天的结果直接丢弃
+function isWithin7Days(dateStr?: string): boolean {
   if (!dateStr) return true;
   try {
     const d = new Date(dateStr);
-    return !isNaN(d.getTime()) && d.getTime() > Date.now() - 48 * 60 * 60 * 1000;
+    return !isNaN(d.getTime()) && d.getTime() > Date.now() - 7 * 24 * 60 * 60 * 1000;
   } catch { return true; }
 }
 
@@ -65,10 +65,6 @@ function unixDaysAgo(days: number) {
   return Math.floor(Date.now() / 1000) - days * 24 * 3600;
 }
 
-const BILI_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  Referer: 'https://www.bilibili.com',
-};
 
 const stripHtml = (s: string) => s.replace(/<[^>]*>/g, '');
 
@@ -103,13 +99,13 @@ interface KeywordSearchResult {
   }>;
 }
 
-// Twitter 关键词搜索（最高优先级，24h 窗口，配额最多）
+// Twitter 关键词搜索（最高优先级，3d 窗口，不使用精确引号以拓宽结果）
 async function searchTwitterByKeyword(keyword: string, limit = 12): Promise<TwitterHit[]> {
   const apiKey = q.getSetting('twitterapi_io_key') || process.env.TWITTERAPI_IO_KEY || '';
   if (!apiKey) return [];
   try {
     const { data } = await axios.get('https://api.twitterapi.io/twitter/tweet/advanced_search', {
-      params: { query: `"${keyword}" min_faves:50 since:${daysAgoStr(1)}`, queryType: 'Top' },
+      params: { query: `${keyword} since:${daysAgoStr(3)}`, queryType: 'Top' },
       headers: { 'x-api-key': apiKey },
       timeout: 10000,
     });
@@ -125,7 +121,12 @@ async function searchTwitterByKeyword(keyword: string, limit = 12): Promise<Twit
       )
       .slice(0, limit);
   } catch (e) {
-    console.warn(`[Search] Twitter search failed for "${keyword}":`, (e as Error).message);
+    const status = (e as any)?.response?.status;
+    if (status === 402) {
+      console.warn(`[Search] Twitter API credits exhausted (402). Please recharge twitterapi.io account.`);
+    } else {
+      console.warn(`[Search] Twitter search failed for "${keyword}":`, (e as Error).message);
+    }
     return [];
   }
 }
@@ -150,58 +151,79 @@ async function searchSerperByKeyword(keyword: string, limit = 6): Promise<Serper
   }
 }
 
+// Bilibili 搜索专用请求头（all/v2 接口需要 Cookie 绕过风控）
+const BILI_SEARCH_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+  'Accept': 'application/json, text/plain, */*',
+  'Accept-Language': 'zh-CN,zh;q=0.9',
+  'Referer': 'https://www.bilibili.com',
+  'Cookie': 'buvid3=B4B7F5E8-6A1C-4D3F-A291-82C3D4E5F6A7infoc; buvid4=rand-seed-123456',
+};
+
 // ── Bilibili B站搜索（视频 + 博主账号识别）──────────────────────────────────────
 async function searchBilibiliHits(keyword: string, limit = 6): Promise<BilibiliHit[]> {
   const hits: BilibiliHit[] = [];
   try {
-    // 先做用户搜索，判断关键词是否是一个博主/账号名
-    const userRes = await axios.get('https://api.bilibili.com/x/web-interface/search/type', {
-      params: { search_type: 'bili_user', keyword, page: 1, page_size: 3 },
-      headers: BILI_HEADERS,
+    // 使用 all/v2 接口一次性获取用户和视频结果
+    const res = await axios.get('https://api.bilibili.com/x/web-interface/search/all/v2', {
+      params: { keyword, page: 1 },
+      headers: BILI_SEARCH_HEADERS,
       timeout: 10000,
     });
-    const users: any[] = userRes.data?.data?.result || [];
-    const matchedUser = users.find((u) => isAccountName(keyword, u.uname || ''));
+
+    const results: any[] = res.data?.data?.result || [];
+    const userResults: any[] = results.find((r) => r.result_type === 'bili_user')?.data || [];
+    const videoResults: any[] = results.find((r) => r.result_type === 'video')?.data || [];
+
+    // 判断是否命中账号名
+    const matchedUser = userResults.find((u: any) => isAccountName(keyword, u.uname || ''));
 
     if (matchedUser?.mid) {
-      // 关键词是账号名 → 直接拉取该用户最新视频
-      const spaceRes = await axios.get('https://api.bilibili.com/x/space/arc/search', {
-        params: { mid: matchedUser.mid, pn: 1, ps: limit, order: 'pubdate' },
-        headers: BILI_HEADERS,
-        timeout: 10000,
-      });
-      const vlist: any[] = spaceRes.data?.data?.list?.vlist || [];
-      const fansLabel = matchedUser.fans >= 10000
-        ? `${(matchedUser.fans / 10000).toFixed(1)}万粉`
+      const fansLabel = (matchedUser.fans || 0) >= 10000
+        ? `${((matchedUser.fans || 0) / 10000).toFixed(1)}万粉`
         : `${matchedUser.fans || 0}粉`;
-      for (const v of vlist.slice(0, limit)) {
-        hits.push({
-          title: stripHtml(v.title || ''),
-          url: `https://www.bilibili.com/video/${v.bvid}`,
-          content: v.description || '',
-          source: `Bilibili @${matchedUser.uname}（${fansLabel}）`,
-          play: v.play || 0,
-          isAccountMatch: true,
-          publishedAt: new Date((v.created || 0) * 1000).toISOString(),
-        });
-      }
-      return hits; // 账号模式：直接返回，不再做内容搜索
-    }
-  } catch { /* fall through */ }
 
-  // 关键词不是账号 → 普通视频内容搜索
-  try {
-    const res = await axios.get('https://api.bilibili.com/x/web-interface/search/type', {
-      params: { search_type: 'video', keyword, page: 1, page_size: limit, order: 'pubdate' },
-      headers: BILI_HEADERS,
-      timeout: 10000,
-    });
-    const videos: any[] = res.data?.data?.result || [];
-    for (const v of videos.slice(0, limit)) {
-      if ((v.pubdate || 0) < unixDaysAgo(1)) continue; // 只要 24h 内
+      // 尝试拉取该用户的最新视频
+      try {
+        const spaceRes = await axios.get('https://api.bilibili.com/x/space/arc/search', {
+          params: { mid: matchedUser.mid, pn: 1, ps: limit, order: 'pubdate' },
+          headers: BILI_SEARCH_HEADERS,
+          timeout: 10000,
+        });
+        const vlist: any[] = spaceRes.data?.data?.list?.vlist || [];
+        for (const v of vlist.slice(0, limit)) {
+          hits.push({
+            title: stripHtml(v.title || ''),
+            url: `https://www.bilibili.com/video/${v.bvid}`,
+            content: v.description || '',
+            source: `Bilibili @${matchedUser.uname}（${fansLabel}）`,
+            play: v.play || 0,
+            isAccountMatch: true,
+            publishedAt: new Date((v.created || 0) * 1000).toISOString(),
+          });
+        }
+      } catch {
+        // space/arc/search 频率限制时，从 all/v2 的视频结果中筛选该用户的视频
+        for (const v of videoResults.filter((v: any) => v.author === matchedUser.uname).slice(0, limit)) {
+          hits.push({
+            title: stripHtml(v.title || ''),
+            url: v.arcurl || `https://www.bilibili.com/video/${v.bvid}`,
+            content: v.description || '',
+            source: `Bilibili @${matchedUser.uname}（${fansLabel}）`,
+            play: v.play || 0,
+            isAccountMatch: true,
+            publishedAt: new Date((v.pubdate || 0) * 1000).toISOString(),
+          });
+        }
+      }
+      if (hits.length > 0) return hits;
+    }
+
+    // 普通关键词视频搜索（不在这里做时间过滤，交给外层 isWithin7Days 统一处理）
+    for (const v of videoResults.slice(0, limit)) {
       hits.push({
         title: stripHtml(v.title || ''),
-        url: `https://www.bilibili.com/video/${v.bvid || ''}`,
+        url: v.arcurl || `https://www.bilibili.com/video/${v.bvid}`,
         content: v.description || '',
         source: `Bilibili（${(v.play || 0).toLocaleString()}播放）`,
         play: v.play || 0,
@@ -217,26 +239,34 @@ async function searchBilibiliHits(keyword: string, limit = 6): Promise<BilibiliH
 
 // ── 新浪微博搜索（移动端 API + 账号识别）────────────────────────────────────
 const WEIBO_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0',
-  Referer: 'https://m.weibo.cn',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+  'Accept': 'application/json, text/plain, */*',
+  'Accept-Language': 'zh-CN,zh;q=0.9',
+  'Referer': 'https://m.weibo.cn',
+  'MWeibo-Pwa': '1',
+  'X-Requested-With': 'XMLHttpRequest',
 };
 
 async function searchWeiboHits(keyword: string, limit = 6): Promise<WeiboHit[]> {
   const hits: WeiboHit[] = [];
+
+  // Step 1: 判断关键词是否是微博用户
   try {
-    // Step 1: 判断关键词是否是微博用户
     const userRes = await axios.get('https://m.weibo.cn/api/container/getIndex', {
-      params: { containerid: `100103type=3&q=${keyword}`, page_type: 'searchall', page: 1 },
+      params: { containerid: `100103type=3&q=${encodeURIComponent(keyword)}`, page_type: 'searchall', page: 1 },
       headers: WEIBO_HEADERS,
       timeout: 10000,
     });
+    if (userRes.data?.ok === -100) {
+      console.warn(`[Search] Weibo API requires login (ok=-100). Skipping Weibo for "${keyword}".`);
+      return hits;
+    }
     const userCards: any[] = userRes.data?.data?.cards || [];
     const userCard = userCards.find(
       (c: any) => c.card_type === 10 && isAccountName(keyword, c.user?.screen_name || '')
     );
 
     if (userCard?.user?.id) {
-      // 是微博账号 → 拉取其最新微博
       const uid = userCard.user.id;
       const timelineRes = await axios.get('https://m.weibo.cn/api/container/getIndex', {
         params: { uid, type: 'uid', containerid: `107603${uid}`, page: 1 },
@@ -264,20 +294,23 @@ async function searchWeiboHits(keyword: string, limit = 6): Promise<WeiboHit[]> 
       }
       return hits;
     }
-  } catch { /* fall through */ }
+  } catch { /* fall through to content search */ }
 
   // Step 2: 普通微博内容搜索
   try {
     const { data } = await axios.get('https://m.weibo.cn/api/container/getIndex', {
-      params: { containerid: `100103type=1&q=${keyword}`, page_type: 'searchall', page: 1 },
+      params: { containerid: `100103type=1&q=${encodeURIComponent(keyword)}`, page_type: 'searchall', page: 1 },
       headers: WEIBO_HEADERS,
       timeout: 10000,
     });
+    if (data?.ok === -100) {
+      console.warn(`[Search] Weibo search requires login (ok=-100). Skipping Weibo for "${keyword}".`);
+      return hits;
+    }
     const cards: any[] = data?.data?.cards || [];
     for (const c of cards.filter((c: any) => c.card_type === 9 && c.mblog).slice(0, limit)) {
       const mb = c.mblog;
       const user = mb.user || {};
-      // 质量过滤：点赞 ≥ 20 或 转发 ≥ 5 或 粉丝 ≥ 1000
       if (
         (mb.attitudes_count || 0) < 20 &&
         (mb.reposts_count || 0) < 5 &&
@@ -377,7 +410,7 @@ export async function searchKeyword(keyword: string): Promise<KeywordSearchResul
 
   // ── Twitter（最高优先级）──
   for (const tweet of twHits) {
-    if (!isWithin48h(tweet.createdAt)) continue;
+    if (!isWithin7Days(tweet.createdAt)) continue;
     const url = tweet.url || `https://twitter.com/i/web/status/${tweet.id}`;
     const authorName = tweet.author?.userName ? `@${tweet.author.userName}` : '';
     const title = `${authorName ? authorName + ': ' : ''}${tweet.text.slice(0, 120)}`;
@@ -426,7 +459,7 @@ export async function searchKeyword(keyword: string): Promise<KeywordSearchResul
 
   // ── HackerNews ──
   for (const hit of hnHits) {
-    if (!isWithin48h(hit.created_at)) continue;
+    if (!isWithin7Days(hit.created_at)) continue;
     const url = hit.url || `https://news.ycombinator.com/item?id=${hit.objectID}`;
     const content = `${hit.title}\n${hit.story_text || ''}`;
 
@@ -476,7 +509,7 @@ export async function searchKeyword(keyword: string): Promise<KeywordSearchResul
     if (!item.title || !item.link) continue;
     let publishedAt = new Date().toISOString();
     try { if (item.date) publishedAt = new Date(item.date).toISOString(); } catch { /* fallback */ }
-    if (!isWithin48h(publishedAt)) continue;
+    if (!isWithin7Days(publishedAt)) continue;
     const url = item.link;
     const content = `${item.title}\n${item.snippet || ''}`;
 
@@ -523,7 +556,7 @@ export async function searchKeyword(keyword: string): Promise<KeywordSearchResul
   // ── Bilibili ──
   for (const hit of biliHits) {
     if (!hit.title || !hit.url) continue;
-    if (!isWithin48h(hit.publishedAt)) continue;
+    if (!isWithin7Days(hit.publishedAt)) continue;
     const matched = hit.isAccountMatch ? true
       : hit.title.toLowerCase().includes(keyword.toLowerCase()) ||
         hit.content.toLowerCase().includes(keyword.toLowerCase());
@@ -542,7 +575,7 @@ export async function searchKeyword(keyword: string): Promise<KeywordSearchResul
   // ── 微博 ──
   for (const hit of weiboHits) {
     if (!hit.title || !hit.url) continue;
-    if (!isWithin48h(hit.publishedAt)) continue;
+    if (!isWithin7Days(hit.publishedAt)) continue;
     const matched = hit.isAccountMatch ? true
       : hit.content.toLowerCase().includes(keyword.toLowerCase());
     const confidence = hit.isAccountMatch ? 0.95 : (matched ? 0.7 : 0);
@@ -562,7 +595,7 @@ export async function searchKeyword(keyword: string): Promise<KeywordSearchResul
     if (!item.title || !item.link) continue;
     let publishedAt = new Date().toISOString();
     try { if (item.date) publishedAt = new Date(item.date).toISOString(); } catch { /* */ }
-    if (!isWithin48h(publishedAt)) continue;
+    if (!isWithin7Days(publishedAt)) continue;
     const content = `${item.title}\n${item.snippet || ''}`;
     let matched = false;
     let confidence = 0;
