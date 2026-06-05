@@ -166,7 +166,10 @@ export async function crawlTwitter(): Promise<number> {
     const aiTerms = ['GPT-5', 'Claude', 'Gemini', 'LLM', 'OpenAI', 'Anthropic', 'AI model'];
     const allTerms = [...new Set([...keywords, ...aiTerms])];
 
-    const query = allTerms.slice(0, 8).map((t) => `"${t}"`).join(' OR ');
+    const since = new Date();
+    since.setDate(since.getDate() - 1);
+    const sinceStr = since.toISOString().split('T')[0];
+    const query = `(${allTerms.slice(0, 8).map((t) => `"${t}"`).join(' OR ')}) since:${sinceStr}`;
 
     const { data } = await axios.get(
       'https://api.twitterapi.io/twitter/tweet/advanced_search',
@@ -257,7 +260,7 @@ export async function crawlSerperNews(): Promise<number> {
 export async function crawlGithubTrending(): Promise<number> {
   try {
     const since = new Date();
-    since.setDate(since.getDate() - 7);
+    since.setDate(since.getDate() - 3);
     const sinceDate = since.toISOString().split('T')[0];
 
     const { data } = await axios.get(
@@ -307,12 +310,100 @@ export async function crawlGithubTrending(): Promise<number> {
   }
 }
 
+// ── Bilibili B站 AI 热门视频 ──────────────────────────────────────────────────
+
+const BILI_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  Referer: 'https://www.bilibili.com',
+};
+
+export async function crawlBilibili(): Promise<number> {
+  try {
+    const { data } = await axios.get('https://api.bilibili.com/x/web-interface/search/type', {
+      params: {
+        search_type: 'video',
+        keyword: 'AI 大模型 人工智能 LLM',
+        page: 1,
+        page_size: 15,
+        order: 'pubdate',
+      },
+      headers: BILI_HEADERS,
+      timeout: 15000,
+    });
+
+    const oneDayAgoTs = Math.floor(Date.now() / 1000) - 1 * 24 * 3600;
+    let inserted = 0;
+    for (const v of (data?.data?.result || []) as any[]) {
+      if ((v.pubdate || 0) < oneDayAgoTs) continue; // 只要 24 小时内的视频
+      if ((v.play || 0) < 500) continue;
+      const title = `[B站] ${v.author}: ${(v.title || '').replace(/<[^>]*>/g, '')}`;
+      const content = `${v.description || ''}\n播放: ${v.play || 0} | 收藏: ${v.favorites || 0}`;
+      const res = q.insertRawItem.run(
+        'Bilibili',
+        title.slice(0, 500),
+        `https://www.bilibili.com/video/${v.bvid}`,
+        content.slice(0, 2000),
+        new Date((v.pubdate || 0) * 1000).toISOString()
+      );
+      if ((res as any).changes > 0) inserted++;
+    }
+
+    console.log(`[Crawler] Bilibili: ${inserted} new videos`);
+    return inserted;
+  } catch (e) {
+    console.warn('[Crawler] Bilibili failed:', (e as Error).message);
+    return 0;
+  }
+}
+
+// ── 微博热搜 ──────────────────────────────────────────────────────────────────
+
+export async function crawlWeiboHot(): Promise<number> {
+  try {
+    const { data } = await axios.get('https://weibo.com/ajax/side/hotSearch', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        Referer: 'https://weibo.com',
+      },
+      timeout: 15000,
+    });
+
+    const items: any[] = data?.data?.realtime || [];
+    let inserted = 0;
+    for (const item of items.slice(0, 20)) {
+      const keyword = item.word || item.note || '';
+      if (!keyword) continue;
+      // 过滤广告和无关内容
+      if (item.is_ad) continue;
+
+      const title = `[微博热搜] ${keyword}`;
+      const content = `热度: ${item.num || 0} | ${item.label_name || ''}`;
+      const url = `https://s.weibo.com/weibo?q=${encodeURIComponent(keyword)}`;
+
+      const res = q.insertRawItem.run(
+        '微博热搜',
+        title.slice(0, 500),
+        url,
+        content,
+        new Date().toISOString()
+      );
+      if ((res as any).changes > 0) inserted++;
+    }
+
+    console.log(`[Crawler] 微博热搜: ${inserted} new topics`);
+    return inserted;
+  } catch (e) {
+    console.warn('[Crawler] 微博热搜 failed:', (e as Error).message);
+    return 0;
+  }
+}
+
 // ── 主入口 ───────────────────────────────────────────────────────────────────
 
 export async function crawlAll(): Promise<number> {
   console.log('[Crawler] Starting crawl...');
 
-  const [rssResults, orNew, twNew, serperNew, ghNew] = await Promise.all([
+  const [rssResults, orNew, twNew, serperNew, ghNew, biliNew, weiboNew] = await Promise.all([
     Promise.all([
       crawlHackerNews(),
       crawlRSS('https://old.reddit.com/r/MachineLearning/.rss', 'Reddit/MachineLearning', 15, rssReddit),
@@ -326,9 +417,20 @@ export async function crawlAll(): Promise<number> {
     crawlTwitter(),
     crawlSerperNews(),
     crawlGithubTrending(),
+    crawlBilibili(),
+    crawlWeiboHot(),
   ]);
 
-  const allItems = rssResults.flat().filter((item) => item.title && item.url);
+  const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
+  const allItems = rssResults.flat().filter((item) => {
+    if (!item.title || !item.url) return false;
+    // 过滤 48 小时前的旧内容
+    try {
+      const d = new Date(item.published_at);
+      if (!isNaN(d.getTime()) && d < fortyEightHoursAgo) return false;
+    } catch { /* keep if unparseable */ }
+    return true;
+  });
 
   let inserted = 0;
   for (const item of allItems) {
@@ -342,9 +444,9 @@ export async function crawlAll(): Promise<number> {
     if ((result as any).changes > 0) inserted++;
   }
 
-  const total = inserted + orNew + twNew + serperNew + ghNew;
+  const total = inserted + orNew + twNew + serperNew + ghNew + biliNew + weiboNew;
   console.log(
-    `[Crawler] Done. RSS: ${inserted} | OpenRouter: ${orNew} | Twitter: ${twNew} | Google: ${serperNew} | GitHub: ${ghNew} new`
+    `[Crawler] Done. RSS: ${inserted} | OpenRouter: ${orNew} | Twitter: ${twNew} | Google: ${serperNew} | GitHub: ${ghNew} | Bilibili: ${biliNew} | 微博: ${weiboNew} new`
   );
   return total;
 }
