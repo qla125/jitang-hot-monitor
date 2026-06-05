@@ -154,57 +154,155 @@ export async function crawlOpenRouterModels(): Promise<number> {
   }
 }
 
-// ── Twitter/X ─────────────────────────────────────────────────────────────────
+// ── Twitter/X (via twitterapi.io) ────────────────────────────────────────────
 
 export async function crawlTwitter(): Promise<number> {
-  const bearerToken =
-    q.getSetting('twitter_bearer_token') || process.env.TWITTER_BEARER_TOKEN || '';
-  const enabled = q.getSetting('twitter_enabled') === 'true';
-
-  if (!enabled || !bearerToken) return 0;
+  const apiKey = q.getSetting('twitterapi_io_key') || process.env.TWITTERAPI_IO_KEY || '';
+  const enabled = q.getSetting('twitterapi_io_enabled') === 'true' || !!process.env.TWITTERAPI_IO_KEY;
+  if (!enabled || !apiKey) return 0;
 
   try {
-    // Dynamic import to avoid error when package not installed
-    const { TwitterApi } = await import('twitter-api-v2');
-    const client = new TwitterApi(bearerToken);
-
-    // Build query from active keywords + base AI terms
-    const keywords = (q.getActiveKeywords() as any[]).map((k) => k.keyword);
-    const aiTerms = ['GPT-5', 'Claude', 'Gemini', 'LLM', 'AI model', 'OpenAI', 'Anthropic'];
+    const keywords = (q.getActiveKeywords() as any[]).map((k: any) => k.keyword);
+    const aiTerms = ['GPT-5', 'Claude', 'Gemini', 'LLM', 'OpenAI', 'Anthropic', 'AI model'];
     const allTerms = [...new Set([...keywords, ...aiTerms])];
 
-    // Twitter search query: OR join, exclude retweets, lang filter
-    const query =
-      `(${allTerms.slice(0, 10).map((t) => `"${t}"`).join(' OR ')}) -is:retweet lang:zh OR lang:en`;
+    const query = allTerms.slice(0, 8).map((t) => `"${t}"`).join(' OR ');
 
-    const result = await client.v2.search(query, {
-      max_results: 20,
-      'tweet.fields': ['created_at', 'text', 'public_metrics'],
-      expansions: ['author_id'],
-      'user.fields': ['name', 'username', 'verified'],
-    });
+    const { data } = await axios.get(
+      'https://api.twitterapi.io/twitter/tweet/advanced_search',
+      {
+        params: { query, queryType: 'Top' },
+        headers: { 'x-api-key': apiKey },
+        timeout: 15000,
+      }
+    );
 
     let inserted = 0;
-    for (const tweet of result.data?.data || []) {
-      const author = result.data?.includes?.users?.find((u) => u.id === tweet.author_id);
-      const authorName = author ? `@${author.username}` : 'Unknown';
-      const url = `https://twitter.com/i/web/status/${tweet.id}`;
-      const title = `[Twitter] ${authorName}: ${tweet.text.slice(0, 100)}`;
+    for (const tweet of (data.tweets || []) as any[]) {
+      // 严格质量过滤
+      if ((tweet.likeCount || 0) < 50) continue;
+      if ((tweet.retweetCount || 0) < 20) continue;
+      if ((tweet.viewCount || 0) < 2000) continue;
+      // 只保留原创推文，过滤回复 / 引用 / 转推
+      if (tweet.isReply === true) continue;
+      if (tweet.retweeted_tweet != null) continue;
+      if (tweet.quoted_tweet != null) continue;
+      // 作者粉丝数过滤
+      if ((tweet.author?.followers || 0) < 500) continue;
+
+      const authorName = tweet.author?.userName ? `@${tweet.author.userName}` : 'Unknown';
+      const url = tweet.url || `https://twitter.com/i/web/status/${tweet.id}`;
+      const title = `[Twitter] ${authorName}: ${(tweet.text || '').slice(0, 100)}`;
 
       const res = q.insertRawItem.run(
         'Twitter/X',
         title.slice(0, 500),
-        url,
-        tweet.text.slice(0, 2000),
-        tweet.created_at || new Date().toISOString()
+        url.slice(0, 1000),
+        (tweet.text || '').slice(0, 2000),
+        tweet.createdAt || new Date().toISOString()
       );
       if ((res as any).changes > 0) inserted++;
     }
 
-    console.log(`[Crawler] Twitter: ${inserted} new tweets`);
+    console.log(`[Crawler] Twitter: ${inserted} new tweets (quality filtered)`);
     return inserted;
   } catch (e) {
     console.warn('[Crawler] Twitter failed:', (e as Error).message);
+    return 0;
+  }
+}
+
+// ── Serper.dev Google 新闻 ────────────────────────────────────────────────────
+
+export async function crawlSerperNews(): Promise<number> {
+  const apiKey = q.getSetting('serper_api_key') || process.env.SERPER_API_KEY || '';
+  if (!apiKey) return 0;
+
+  try {
+    const { data } = await axios.post(
+      'https://google.serper.dev/news',
+      { q: 'AI artificial intelligence LLM large language model', gl: 'us', hl: 'en', num: 10 },
+      {
+        headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
+        timeout: 15000,
+      }
+    );
+
+    let inserted = 0;
+    for (const item of (data.news || []) as any[]) {
+      if (!item.title || !item.link) continue;
+      let publishedAt = new Date().toISOString();
+      try { if (item.date) publishedAt = new Date(item.date).toISOString(); } catch { /* fallback */ }
+
+      const res = q.insertRawItem.run(
+        'Google News',
+        item.title.slice(0, 500),
+        item.link.slice(0, 1000),
+        (item.snippet || '').slice(0, 2000),
+        publishedAt
+      );
+      if ((res as any).changes > 0) inserted++;
+    }
+
+    console.log(`[Crawler] Google News (Serper): ${inserted} new items`);
+    return inserted;
+  } catch (e) {
+    console.warn('[Crawler] Serper News failed:', (e as Error).message);
+    return 0;
+  }
+}
+
+// ── GitHub Trending ───────────────────────────────────────────────────────────
+
+export async function crawlGithubTrending(): Promise<number> {
+  try {
+    const since = new Date();
+    since.setDate(since.getDate() - 7);
+    const sinceDate = since.toISOString().split('T')[0];
+
+    const { data } = await axios.get(
+      'https://api.github.com/search/repositories',
+      {
+        params: {
+          q: `topic:llm OR topic:ai-agent OR topic:large-language-model OR topic:generative-ai pushed:>${sinceDate} stars:>50`,
+          sort: 'stars',
+          order: 'desc',
+          per_page: 10,
+        },
+        headers: {
+          Accept: 'application/vnd.github.v3+json',
+          'User-Agent': 'JitangHotMonitor/1.0',
+        },
+        timeout: 15000,
+      }
+    );
+
+    let inserted = 0;
+    for (const repo of (data.items || []) as any[]) {
+      const stars = (repo.stargazers_count || 0).toLocaleString();
+      const desc = (repo.description || '').slice(0, 80);
+      const title = `[GitHub] ${repo.full_name} ⭐${stars}${desc ? ' — ' + desc : ''}`;
+      const content = [
+        repo.description || '',
+        `语言: ${repo.language || 'N/A'}`,
+        `Stars: ${repo.stargazers_count}`,
+        `Topics: ${(repo.topics || []).join(', ')}`,
+      ].join('\n');
+
+      const res = q.insertRawItem.run(
+        'GitHub Trending',
+        title.slice(0, 500),
+        repo.html_url,
+        content.slice(0, 2000),
+        repo.pushed_at || new Date().toISOString()
+      );
+      if ((res as any).changes > 0) inserted++;
+    }
+
+    console.log(`[Crawler] GitHub Trending: ${inserted} new repos`);
+    return inserted;
+  } catch (e) {
+    console.warn('[Crawler] GitHub Trending failed:', (e as Error).message);
     return 0;
   }
 }
@@ -214,20 +312,20 @@ export async function crawlTwitter(): Promise<number> {
 export async function crawlAll(): Promise<number> {
   console.log('[Crawler] Starting crawl...');
 
-  const [rssResults, orNew, twNew] = await Promise.all([
+  const [rssResults, orNew, twNew, serperNew, ghNew] = await Promise.all([
     Promise.all([
       crawlHackerNews(),
-      // Reddit: use old.reddit.com + browser UA to avoid 403
       crawlRSS('https://old.reddit.com/r/MachineLearning/.rss', 'Reddit/MachineLearning', 15, rssReddit),
       crawlRSS('https://old.reddit.com/r/LocalLLaMA/.rss', 'Reddit/LocalLLaMA', 15, rssReddit),
       crawlRSS('https://old.reddit.com/r/artificial/.rss', 'Reddit/artificial', 15, rssReddit),
       crawlRSS('https://huggingface.co/blog/feed.xml', 'HuggingFace Blog', 10),
-      // The Verge AI: updated URL
       crawlRSS('https://www.theverge.com/rss/ai-artificial-intelligence/index.xml', 'The Verge AI', 10),
       crawlRSS('https://feeds.feedburner.com/venturebeat/SZYF', 'VentureBeat AI', 10),
     ]),
     crawlOpenRouterModels(),
     crawlTwitter(),
+    crawlSerperNews(),
+    crawlGithubTrending(),
   ]);
 
   const allItems = rssResults.flat().filter((item) => item.title && item.url);
@@ -244,7 +342,9 @@ export async function crawlAll(): Promise<number> {
     if ((result as any).changes > 0) inserted++;
   }
 
-  const total = inserted + orNew + twNew;
-  console.log(`[Crawler] Done. RSS: ${inserted} | OpenRouter: ${orNew} | Twitter: ${twNew} new`);
+  const total = inserted + orNew + twNew + serperNew + ghNew;
+  console.log(
+    `[Crawler] Done. RSS: ${inserted} | OpenRouter: ${orNew} | Twitter: ${twNew} | Google: ${serperNew} | GitHub: ${ghNew} new`
+  );
   return total;
 }

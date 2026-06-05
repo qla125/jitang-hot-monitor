@@ -82,8 +82,9 @@ const defaultSettings: Record<string, string> = {
   email_to: '',
   check_interval: '30',
   openrouter_model: 'deepseek/deepseek-chat',
-  twitter_bearer_token: '',
-  twitter_enabled: 'false',
+  twitterapi_io_key: '',
+  twitterapi_io_enabled: 'false',
+  serper_api_key: '',
 };
 
 for (const [key, value] of Object.entries(defaultSettings)) {

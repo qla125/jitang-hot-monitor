@@ -113,6 +113,39 @@ export default function SettingsPage() {
             </div>
           </div>
 
+          {/* Serper Google News */}
+          <div className="bg-white rounded-2xl shadow-card p-5">
+            <h2 className="text-sm font-semibold text-matcha-800 mb-4 flex items-center gap-2">
+              <span className="w-5 h-5 rounded-md bg-matcha-50 border border-matcha-200 flex items-center justify-center text-xs">🔍</span>
+              Google 新闻搜索 · Serper.dev
+            </h2>
+            <Field label="API Key" value={settings.serper_api_key || ''} onChange={set('serper_api_key')}
+              placeholder="从 serper.dev 获取" showToggle
+              hint="用于立即扫描和后台抓取 Google 新闻，初始免费 2500 次" />
+          </div>
+
+          {/* Twitter */}
+          <div className="bg-white rounded-2xl shadow-card p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold text-matcha-800 flex items-center gap-2">
+                <span className="w-5 h-5 rounded-md bg-matcha-50 border border-matcha-200 flex items-center justify-center text-xs">𝕏</span>
+                Twitter 监控 · twitterapi.io
+              </h2>
+              <button type="button"
+                onClick={() => set('twitterapi_io_enabled')(settings.twitterapi_io_enabled === 'true' ? 'false' : 'true')}
+                className={cn('relative w-10 h-5 rounded-full border-2 transition-all',
+                  settings.twitterapi_io_enabled === 'true' ? 'bg-matcha-50 border-matcha-400' : 'bg-cream-200 border-cream-300')}>
+                <div className={cn('absolute top-0.5 w-3.5 h-3.5 rounded-full transition-all',
+                  settings.twitterapi_io_enabled === 'true' ? 'left-[18px] bg-matcha-500' : 'left-0.5 bg-cream-300')} />
+              </button>
+            </div>
+            {settings.twitterapi_io_enabled === 'true' && (
+              <Field label="API Key" value={settings.twitterapi_io_key || ''} onChange={set('twitterapi_io_key')}
+                placeholder="从 twitterapi.io 控制台复制" showToggle
+                hint="注册后免费试用，无需官方 Twitter API" />
+            )}
+          </div>
+
           {/* Email */}
           <div className="bg-white rounded-2xl shadow-card p-5">
             <div className="flex items-center justify-between mb-4">

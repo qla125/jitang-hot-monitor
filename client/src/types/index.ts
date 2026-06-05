@@ -51,8 +51,9 @@ export interface Settings {
   check_interval: string
   openrouter_model: string
   openrouter_api_key?: string
-  twitter_bearer_token?: string
-  twitter_enabled: string
+  twitterapi_io_key?: string
+  twitterapi_io_enabled: string
+  serper_api_key?: string
 }
 
 export interface SSEAlert {

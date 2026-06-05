@@ -13,8 +13,9 @@ const ALLOWED_KEYS = [
   'check_interval',
   'openrouter_model',
   'openrouter_api_key',
-  'twitter_bearer_token',
-  'twitter_enabled',
+  'twitterapi_io_key',
+  'twitterapi_io_enabled',
+  'serper_api_key',
 ];
 
 router.get('/', (_req: Request, res: Response) => {
