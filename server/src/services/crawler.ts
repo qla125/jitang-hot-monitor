@@ -166,10 +166,9 @@ export async function crawlTwitter(): Promise<number> {
     const aiTerms = ['GPT-5', 'Claude', 'Gemini', 'LLM', 'OpenAI', 'Anthropic', 'AI model'];
     const allTerms = [...new Set([...keywords, ...aiTerms])];
 
-    const since = new Date();
-    since.setDate(since.getDate() - 1);
-    const sinceStr = since.toISOString().split('T')[0];
-    const query = `(${allTerms.slice(0, 8).map((t) => `"${t}"`).join(' OR ')}) since:${sinceStr}`;
+    // since_time: Unix 时间戳（twitterapi.io 不支持 since:YYYY-MM-DD 格式）
+    const sinceTs = Math.floor(Date.now() / 1000) - 24 * 3600;
+    const query = `(${allTerms.slice(0, 8).map((t) => `"${t}"`).join(' OR ')}) since_time:${sinceTs}`;
 
     const { data } = await axios.get(
       'https://api.twitterapi.io/twitter/tweet/advanced_search',

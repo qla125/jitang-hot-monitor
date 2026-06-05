@@ -99,13 +99,15 @@ interface KeywordSearchResult {
   }>;
 }
 
-// Twitter 关键词搜索（最高优先级，3d 窗口，不使用精确引号以拓宽结果）
+// Twitter 关键词搜索（最高优先级，3d 窗口）
+// 注意：twitterapi.io 不支持 since:/until: 日期格式，需用 since_time:/until_time: Unix 时间戳
 async function searchTwitterByKeyword(keyword: string, limit = 12): Promise<TwitterHit[]> {
   const apiKey = q.getSetting('twitterapi_io_key') || process.env.TWITTERAPI_IO_KEY || '';
   if (!apiKey) return [];
   try {
+    const sinceTs = unixDaysAgo(3);
     const { data } = await axios.get('https://api.twitterapi.io/twitter/tweet/advanced_search', {
-      params: { query: `${keyword} since:${daysAgoStr(3)}`, queryType: 'Top' },
+      params: { query: `${keyword} since_time:${sinceTs}`, queryType: 'Top' },
       headers: { 'x-api-key': apiKey },
       timeout: 10000,
     });
