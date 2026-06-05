@@ -281,7 +281,7 @@ export default function Dashboard() {
                       </a>
                     ))}
                     {r.items.filter(i => i.matched).length === 0 && (
-                      <p className="text-matcha-300 text-xs font-mono">近期 HackerNews 未找到高相关内容</p>
+                      <p className="text-matcha-300 text-xs font-mono">近期未找到高相关内容</p>
                     )}
                   </div>
                 </div>
