@@ -13,7 +13,7 @@ export const keywordsApi = {
 }
 
 export const topicsApi = {
-  getAll: (hours = 48) =>
+  getAll: (hours = 720) =>
     api.get<HotTopic[]>('/hot-topics', { params: { hours } }),
   refresh: () => api.post('/hot-topics/refresh'),
   searchKeywords: () => api.post<{ message: string; keywords: string[] }>('/hot-topics/search-keywords'),

@@ -26,6 +26,7 @@ export interface HotTopic {
   published_at: string
   created_at: string
   alert_count: number
+  alert_keywords?: string
 }
 
 export interface Alert {

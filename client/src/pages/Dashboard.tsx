@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { RefreshCw, Settings, Bell, Zap, Radio, Search } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { RefreshCw, Settings, Bell, Zap, Radio, Search, ArrowUpDown } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { MovingBorderButton } from '@/components/aceternity/moving-border'
@@ -8,9 +8,11 @@ import RadarCanvas from '@/components/RadarCanvas'
 import HotTopicCard from '@/components/HotTopicCard'
 import KeywordManager from '@/components/KeywordManager'
 import AlertBanner from '@/components/AlertBanner'
+import FilterSortBar from '@/components/FilterSortBar'
 import { topicsApi, keywordsApi, alertsApi } from '@/api'
 import { useSSE } from '@/hooks/useSSE'
-import type { HotTopic, Keyword, Alert, SSEAlert, TopicCategory, SSESearchComplete } from '@/types'
+import { useTopicFilters, applyFiltersAndSort, getSourceTag } from '@/hooks/useTopicFilters'
+import type { HotTopic, Keyword, Alert, SSEAlert, TopicCategory, SSESearchComplete, SearchResultItem } from '@/types'
 
 type Filter = 'all' | TopicCategory
 
@@ -22,6 +24,14 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: 'funding', label: '融资' },
   { key: 'discussion', label: '讨论' },
 ]
+
+// 搜索结果的排序/筛选类型
+type SearchSort = 'confidence' | 'source' | 'heat'
+const SEARCH_SORT_LABELS: Record<SearchSort, string> = {
+  confidence: '置信度',
+  source: '来源',
+  heat: '热度',
+}
 
 export default function Dashboard() {
   const [topics, setTopics] = useState<HotTopic[]>([])
@@ -37,9 +47,16 @@ export default function Dashboard() {
   const [notifyPerm, setNotifyPerm] = useState<NotificationPermission>('default')
   const sseAlertsRef = useRef<SSEAlert[]>([])
 
+  // 搜索弹窗内部的排序 + 来源筛选
+  const [searchSort, setSearchSort] = useState<SearchSort>('confidence')
+  const [searchSourceFilter, setSearchSourceFilter] = useState<string>('')
+
+  // 主列表排序/筛选
+  const { filters, updateFilter, resetFilters, activeCount } = useTopicFilters()
+
   const loadTopics = useCallback(async () => {
     try {
-      const res = await topicsApi.getAll(48)
+      const res = await topicsApi.getAll(720)
       setTopics(res.data)
       setLastUpdate(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }))
     } catch (e) { console.error(e) }
@@ -63,6 +80,7 @@ export default function Dashboard() {
 
   const handleScan = async () => {
     setSearching(true); setRefreshing(true); setSearchResults(null)
+    setSearchSort('confidence'); setSearchSourceFilter('')
     try {
       await topicsApi.searchKeywords()
       setTimeout(() => { loadTopics(); loadAlerts(); setRefreshing(false) }, 20000)
@@ -87,8 +105,49 @@ export default function Dashboard() {
     },
   })
 
-  const filtered = filter === 'all' ? topics : topics.filter(t => t.category === filter)
+  // 主列表：应用筛选 + 排序
+  const filtered = useMemo(
+    () => applyFiltersAndSort(topics, filters, filter),
+    [topics, filters, filter],
+  )
   const hotCount = topics.filter(t => t.score >= 8).length
+
+  // 当前数据库里存在的所有来源标签（去重）
+  const availableSources = useMemo(
+    () => [...new Set(topics.map(t => getSourceTag(t.source)))].sort(),
+    [topics],
+  )
+
+  // 搜索结果弹窗内：对 matched 条目排序 + 来源筛选
+  const processedSearchResults = useMemo(() => {
+    if (!searchResults) return null
+    return {
+      ...searchResults,
+      results: searchResults.results.map(r => {
+        let items = r.items.filter(i => i.matched)
+        // 来源筛选
+        if (searchSourceFilter) {
+          items = items.filter(i => getSourceTag(i.source) === searchSourceFilter)
+        }
+        // 排序
+        items = [...items].sort((a, b) => {
+          if (searchSort === 'confidence') return b.confidence - a.confidence
+          if (searchSort === 'heat') return b.points - a.points
+          if (searchSort === 'source') return a.source.localeCompare(b.source)
+          return 0
+        })
+        return { ...r, items: [...items, ...r.items.filter(i => !i.matched)] }
+      }),
+    }
+  }, [searchResults, searchSort, searchSourceFilter])
+
+  // 搜索结果弹窗里可用的来源列表
+  const searchAvailableSources = useMemo(() => {
+    if (!searchResults) return []
+    const all: string[] = []
+    searchResults.results.forEach(r => r.items.filter(i => i.matched).forEach(i => all.push(getSourceTag(i.source))))
+    return [...new Set(all)].sort()
+  }, [searchResults])
 
   return (
     <div className="flex h-screen bg-cream-100 text-matcha-900 font-body overflow-hidden">
@@ -96,7 +155,6 @@ export default function Dashboard() {
 
       {/* ── Sidebar ── */}
       <aside className="relative z-10 w-56 flex-none flex flex-col sidebar-panel">
-        {/* Logo */}
         <div className="flex items-center gap-2.5 px-4 py-4 border-b border-matcha-100">
           <div className="relative shrink-0">
             <div className="w-6 h-6 rounded-full bg-matcha-50 border border-matcha-200 flex items-center justify-center">
@@ -110,7 +168,6 @@ export default function Dashboard() {
           </span>
         </div>
 
-        {/* Radar */}
         <div className="px-3 pt-3 pb-1">
           <p className="text-[9px] font-mono text-matcha-300 uppercase tracking-widest mb-2 px-1">
             信号扫描 · {topics.length} 个
@@ -118,11 +175,10 @@ export default function Dashboard() {
           <RadarCanvas topics={topics} />
         </div>
 
-        {/* Stats */}
         <div className="grid grid-cols-2 gap-1.5 px-3 py-2">
           <div className="bg-white rounded-lg px-2.5 py-2 text-center shadow-card">
-            <p className="font-mono font-bold text-lg text-matcha-600 leading-none">{topics.length}</p>
-            <p className="text-[10px] text-matcha-300 mt-0.5">热点</p>
+            <p className="font-mono font-bold text-lg text-matcha-600 leading-none">{filtered.length}</p>
+            <p className="text-[10px] text-matcha-300 mt-0.5">显示</p>
           </div>
           <div className="bg-white rounded-lg px-2.5 py-2 text-center shadow-card">
             <p className="font-mono font-bold text-lg text-clay-500 leading-none">{hotCount}</p>
@@ -130,12 +186,10 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Keywords */}
         <div className="flex-1 overflow-y-auto px-3 py-2 border-t border-matcha-50">
           <KeywordManager keywords={keywords} onRefresh={loadKeywords} />
         </div>
 
-        {/* Recent alerts */}
         {alerts.slice(0, 3).length > 0 && (
           <div className="px-3 py-2 border-t border-matcha-50">
             <p className="text-[9px] font-mono text-matcha-300 uppercase tracking-widest mb-1.5">最新告警</p>
@@ -154,7 +208,6 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Footer */}
         <div className="flex items-center gap-1 p-3 border-t border-matcha-100">
           <Link to="/settings"
             className="flex items-center gap-1.5 text-[11px] text-matcha-400 hover:text-matcha-700 transition-colors px-2 py-1.5 rounded-lg hover:bg-matcha-50">
@@ -178,7 +231,7 @@ export default function Dashboard() {
 
       {/* ── Main ── */}
       <main className="relative z-10 flex-1 flex flex-col overflow-hidden">
-        {/* Topbar */}
+        {/* Topbar：分类 tab + 操作按钮 */}
         <header className="flex items-center gap-3 px-5 py-3 border-b border-matcha-100 bg-white/60 backdrop-blur-sm shrink-0">
           <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
             {FILTERS.map(f => (
@@ -201,7 +254,6 @@ export default function Dashboard() {
                 更新 {lastUpdate}
               </span>
             )}
-
             <MovingBorderButton
               containerClassName="h-8 w-auto rounded-lg"
               className="text-xs font-medium gap-1.5 px-4 text-matcha-700"
@@ -214,7 +266,6 @@ export default function Dashboard() {
                 ? <><RefreshCw size={11} className="animate-spin" />搜索中</>
                 : <><Search size={11} />立即扫描</>}
             </MovingBorderButton>
-
             <button
               onClick={loadTopics}
               disabled={refreshing}
@@ -225,6 +276,16 @@ export default function Dashboard() {
           </div>
         </header>
 
+        {/* 排序 + 筛选工具栏 */}
+        <FilterSortBar
+          filters={filters}
+          updateFilter={updateFilter}
+          resetFilters={resetFilters}
+          activeCount={activeCount}
+          availableSources={availableSources}
+          keywords={keywords}
+        />
+
         {/* Feed */}
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {filtered.length === 0 ? (
@@ -232,11 +293,20 @@ export default function Dashboard() {
               <div className="w-12 h-12 rounded-full bg-matcha-50 border border-matcha-200 flex items-center justify-center">
                 <Radio size={20} className="text-matcha-300" />
               </div>
-              <p className="text-matcha-300 text-sm font-mono">暂无热点数据</p>
-              <button onClick={handleScan}
-                className="text-xs text-matcha-600 bg-matcha-50 border border-matcha-200 px-4 py-2 rounded-lg hover:bg-matcha-100 transition-all">
-                立即扫描
-              </button>
+              <p className="text-matcha-300 text-sm font-mono">
+                {activeCount > 0 ? '当前筛选条件下无数据' : '暂无热点数据'}
+              </p>
+              {activeCount > 0 ? (
+                <button onClick={resetFilters}
+                  className="text-xs text-matcha-600 bg-matcha-50 border border-matcha-200 px-4 py-2 rounded-lg hover:bg-matcha-100 transition-all">
+                  清除筛选
+                </button>
+              ) : (
+                <button onClick={handleScan}
+                  className="text-xs text-matcha-600 bg-matcha-50 border border-matcha-200 px-4 py-2 rounded-lg hover:bg-matcha-100 transition-all">
+                  立即扫描
+                </button>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-2.5">
@@ -246,46 +316,86 @@ export default function Dashboard() {
         </div>
       </main>
 
-      {/* Search result modal */}
-      {searchResults && (
+      {/* ── 搜索结果弹窗 ── */}
+      {processedSearchResults && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-matcha-900/20 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-white rounded-2xl shadow-[0_8px_40px_rgba(42,51,32,0.15)] border border-matcha-100 w-full max-w-xl max-h-[75vh] flex flex-col">
+          <div className="bg-white rounded-2xl shadow-[0_8px_40px_rgba(42,51,32,0.15)] border border-matcha-100 w-full max-w-xl max-h-[80vh] flex flex-col">
+            {/* 弹窗头 */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-matcha-100">
               <div>
                 <h2 className="font-display font-bold text-base text-matcha-900">关键词搜索结果</h2>
                 <p className="text-xs text-matcha-400 mt-0.5 font-mono">
-                  共命中 <span className="text-matcha-600 font-bold">{searchResults.totalFound}</span> 条相关内容
+                  共命中 <span className="text-matcha-600 font-bold">{processedSearchResults.totalFound}</span> 条相关内容
                 </p>
               </div>
               <button onClick={() => setSearchResults(null)} className="text-matcha-300 hover:text-matcha-700 transition-colors p-1 rounded-lg hover:bg-matcha-50">✕</button>
             </div>
+
+            {/* 搜索结果排序 + 来源筛选工具栏 */}
+            <div className="flex items-center gap-2 px-5 py-2.5 border-b border-matcha-50 bg-cream-100/60">
+              <ArrowUpDown size={10} className="text-matcha-300 shrink-0" />
+              <div className="flex items-center gap-1">
+                {(Object.entries(SEARCH_SORT_LABELS) as [SearchSort, string][]).map(([k, v]) => (
+                  <button key={k} onClick={() => setSearchSort(k)}
+                    className={cn(
+                      'text-[10px] font-mono px-2 py-1 rounded-md transition-all',
+                      searchSort === k
+                        ? 'bg-matcha-50 text-matcha-700 border border-matcha-200 font-semibold'
+                        : 'text-matcha-400 hover:text-matcha-600',
+                    )}>
+                    {v}
+                  </button>
+                ))}
+              </div>
+              {searchAvailableSources.length > 1 && (
+                <>
+                  <div className="w-px h-3 bg-matcha-100" />
+                  <select
+                    value={searchSourceFilter}
+                    onChange={e => setSearchSourceFilter(e.target.value)}
+                    className="text-[10px] font-mono text-matcha-500 bg-transparent border border-matcha-100 rounded-md px-1.5 py-1 focus:outline-none focus:border-matcha-300"
+                  >
+                    <option value="">全部来源</option>
+                    {searchAvailableSources.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </>
+              )}
+            </div>
+
+            {/* 搜索结果列表 */}
             <div className="overflow-y-auto p-4 flex flex-col gap-3">
-              {searchResults.results.map(r => (
-                <div key={r.keyword} className="bg-cream-100 rounded-xl border border-matcha-100 p-4">
-                  <div className="flex items-center gap-2 mb-2.5">
-                    <span className="text-xs font-mono font-semibold text-clay-500">「{r.keyword}」</span>
-                    <span className={cn('text-[10px] font-mono px-1.5 py-0.5 rounded-md border',
-                      r.count > 0 ? 'text-matcha-600 bg-matcha-50 border-matcha-200' : 'text-matcha-300 bg-cream-200 border-cream-300')}>
-                      {r.count > 0 ? `${r.count} 条命中` : '暂无'}
-                    </span>
+              {processedSearchResults.results.map(r => {
+                const matchedItems = r.items.filter(i => i.matched)
+                return (
+                  <div key={r.keyword} className="bg-cream-100 rounded-xl border border-matcha-100 p-4">
+                    <div className="flex items-center gap-2 mb-2.5">
+                      <span className="text-xs font-mono font-semibold text-clay-500">「{r.keyword}」</span>
+                      <span className={cn('text-[10px] font-mono px-1.5 py-0.5 rounded-md border',
+                        r.count > 0 ? 'text-matcha-600 bg-matcha-50 border-matcha-200' : 'text-matcha-300 bg-cream-200 border-cream-300')}>
+                        {r.count > 0 ? `${r.count} 条命中` : '暂无'}
+                      </span>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      {matchedItems.map((item, idx) => (
+                        <a key={idx} href={item.url} target="_blank" rel="noopener noreferrer"
+                           className="flex items-start gap-2 p-2 rounded-lg hover:bg-white transition-all group">
+                          <span className="text-matcha-400 text-xs mt-0.5 shrink-0 font-mono">▸</span>
+                          <div className="min-w-0">
+                            <p className="text-matcha-800 text-xs leading-snug line-clamp-2 group-hover:text-matcha-900">{item.title}</p>
+                            <p className="text-matcha-300 text-[10px] mt-0.5 font-mono">
+                              {item.source} · {(item.confidence * 100).toFixed(0)}% 相关
+                              {item.points > 0 && ` · ${item.points} 热度`}
+                            </p>
+                          </div>
+                        </a>
+                      ))}
+                      {matchedItems.length === 0 && (
+                        <p className="text-matcha-300 text-xs font-mono">近期未找到高相关内容</p>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex flex-col gap-1.5">
-                    {r.items.filter(i => i.matched).map((item, idx) => (
-                      <a key={idx} href={item.url} target="_blank" rel="noopener noreferrer"
-                         className="flex items-start gap-2 p-2 rounded-lg hover:bg-white transition-all group">
-                        <span className="text-matcha-400 text-xs mt-0.5 shrink-0 font-mono">▸</span>
-                        <div className="min-w-0">
-                          <p className="text-matcha-800 text-xs leading-snug line-clamp-2 group-hover:text-matcha-900">{item.title}</p>
-                          <p className="text-matcha-300 text-[10px] mt-0.5 font-mono">{item.source} · {(item.confidence * 100).toFixed(0)}%</p>
-                        </div>
-                      </a>
-                    ))}
-                    {r.items.filter(i => i.matched).length === 0 && (
-                      <p className="text-matcha-300 text-xs font-mono">近期未找到高相关内容</p>
-                    )}
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         </div>

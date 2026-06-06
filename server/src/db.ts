@@ -112,15 +112,16 @@ export const q = {
   insertHotTopic: db.prepare(
     'INSERT INTO hot_topics (raw_item_id, title, url, source, summary, score, category, published_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
   ),
-  getRecentTopics: (hours = 48) =>
+  getRecentTopics: (hours = 720) =>
     db
       .prepare(
         `SELECT ht.*,
-          (SELECT COUNT(*) FROM alerts a WHERE a.hot_topic_id = ht.id) as alert_count
+          (SELECT COUNT(*) FROM alerts a WHERE a.hot_topic_id = ht.id) as alert_count,
+          (SELECT GROUP_CONCAT(DISTINCT a.keyword_text) FROM alerts a WHERE a.hot_topic_id = ht.id) as alert_keywords
          FROM hot_topics ht
          WHERE ht.created_at > datetime('now', '-' || ? || ' hours', 'localtime')
          ORDER BY ht.score DESC, ht.created_at DESC
-         LIMIT 100`
+         LIMIT 200`
       )
       .all(hours),
 
