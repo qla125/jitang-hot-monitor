@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+
+const PAGE_SIZE = 20
 import { RefreshCw, Settings, Bell, Zap, Radio, Search, ArrowUpDown } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { cn } from '@/lib/utils'
@@ -53,6 +55,7 @@ export default function Dashboard() {
 
   // 主列表排序/筛选
   const { filters, updateFilter, resetFilters, activeCount } = useTopicFilters()
+  const [page, setPage] = useState(1)
 
   const loadTopics = useCallback(async () => {
     try {
@@ -111,6 +114,15 @@ export default function Dashboard() {
     [topics, filters, filter],
   )
   const hotCount = topics.filter(t => t.score >= 8).length
+
+  // 筛选条件或分类改变时重置到第一页
+  useEffect(() => { setPage(1) }, [filters, filter])
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
+  const pagedTopics = useMemo(
+    () => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [filtered, page],
+  )
 
   // 当前数据库里存在的所有来源标签（去重）
   const availableSources = useMemo(
@@ -309,9 +321,67 @@ export default function Dashboard() {
               )}
             </div>
           ) : (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-2.5">
-              {filtered.map(t => <HotTopicCard key={t.id} topic={t} />)}
-            </div>
+            <>
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-2.5">
+                {pagedTopics.map(t => (
+                  <HotTopicCard
+                    key={t.id}
+                    topic={t}
+                    sortMode={filters.sortBy !== 'newest' ? filters.sortBy : undefined}
+                  />
+                ))}
+              </div>
+
+              {totalPages > 1 && (
+                <div className="flex items-center justify-center gap-1 mt-5 pb-2">
+                  <button
+                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                    disabled={page === 1}
+                    className="px-2.5 py-1.5 text-[11px] font-mono rounded-lg border border-matcha-100 text-matcha-400 hover:text-matcha-700 hover:border-matcha-200 hover:bg-matcha-50 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    ‹
+                  </button>
+
+                  {Array.from({ length: totalPages }, (_, i) => i + 1)
+                    .filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
+                    .reduce<(number | 'ellipsis')[]>((acc, p, idx, arr) => {
+                      if (idx > 0 && (p as number) - (arr[idx - 1] as number) > 1) acc.push('ellipsis')
+                      acc.push(p)
+                      return acc
+                    }, [])
+                    .map((p, idx) =>
+                      p === 'ellipsis' ? (
+                        <span key={`ellipsis-${idx}`} className="px-1 text-[11px] font-mono text-matcha-300">…</span>
+                      ) : (
+                        <button
+                          key={p}
+                          onClick={() => setPage(p as number)}
+                          className={cn(
+                            'min-w-[28px] px-2 py-1.5 text-[11px] font-mono rounded-lg border transition-all',
+                            page === p
+                              ? 'bg-matcha-500 text-white border-matcha-500 font-semibold'
+                              : 'border-matcha-100 text-matcha-400 hover:text-matcha-700 hover:border-matcha-200 hover:bg-matcha-50',
+                          )}
+                        >
+                          {p}
+                        </button>
+                      )
+                    )}
+
+                  <button
+                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                    disabled={page === totalPages}
+                    className="px-2.5 py-1.5 text-[11px] font-mono rounded-lg border border-matcha-100 text-matcha-400 hover:text-matcha-700 hover:border-matcha-200 hover:bg-matcha-50 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    ›
+                  </button>
+
+                  <span className="ml-2 text-[10px] font-mono text-matcha-300">
+                    {page} / {totalPages} 页
+                  </span>
+                </div>
+              )}
+            </>
           )}
         </div>
       </main>

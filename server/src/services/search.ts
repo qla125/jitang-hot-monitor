@@ -440,7 +440,7 @@ export async function searchKeyword(keyword: string): Promise<KeywordSearchResul
           const topicInfo = q.insertHotTopic.run(
             (insertResult as any).lastInsertRowid, title, url,
             'Twitter/X Search', '',
-            Math.min(10, Math.round((tweet.likeCount || 0) / 50) + 5),
+            Math.min(10, Math.round((tweet.likeCount || 0) / 50) + 4),
             'discussion', tweet.createdAt || new Date().toISOString()
           );
           const topicId = topicInfo.lastInsertRowid as number;
@@ -487,7 +487,7 @@ export async function searchKeyword(keyword: string): Promise<KeywordSearchResul
           const topicInfo = q.insertHotTopic.run(
             (insertResult as any).lastInsertRowid, hit.title, url,
             'HackerNews Search', '',
-            Math.min(10, Math.round((hit.points || 0) / 20) + 5),
+            Math.min(10, Math.round((hit.points || 0) / 20) + 4),
             'discussion', hit.created_at
           );
           const topicId = topicInfo.lastInsertRowid as number;
@@ -537,7 +537,7 @@ export async function searchKeyword(keyword: string): Promise<KeywordSearchResul
           const topicInfo = q.insertHotTopic.run(
             (insertResult as any).lastInsertRowid, item.title, url,
             `Google News${item.source ? ' · ' + item.source : ''}`, '',
-            7, 'other', publishedAt
+            6, 'other', publishedAt
           );
           const topicId = topicInfo.lastInsertRowid as number;
           if (kw && !q.checkDuplicateAlert(kw.id, topicId)) {
@@ -567,7 +567,7 @@ export async function searchKeyword(keyword: string): Promise<KeywordSearchResul
       result.count++;
       await insertMatchedItem(
         hit.source, hit.title, hit.url, hit.content, hit.publishedAt,
-        Math.min(10, Math.round((hit.play || 0) / 5000) + 5),
+        Math.min(10, Math.round((hit.play || 0) / 5000) + 4),
         'tool-update', keyword, kw, confidence, 'bilibili match'
       );
     }
@@ -585,7 +585,7 @@ export async function searchKeyword(keyword: string): Promise<KeywordSearchResul
       result.count++;
       await insertMatchedItem(
         hit.source, hit.title, hit.url, hit.content, hit.publishedAt,
-        Math.min(10, Math.round((hit.likesCount || 0) / 100) + 5),
+        Math.min(10, Math.round((hit.likesCount || 0) / 100) + 4),
         'discussion', keyword, kw, confidence, 'weibo match'
       );
     }
@@ -614,7 +614,7 @@ export async function searchKeyword(keyword: string): Promise<KeywordSearchResul
       await insertMatchedItem(
         `百度新闻${item.source ? ' · ' + item.source : ''}`,
         item.title, item.link, item.snippet || '', publishedAt,
-        7, 'other', keyword, kw, confidence, 'baidu news match'
+        6, 'other', keyword, kw, confidence, 'baidu news match'
       );
     }
     result.items.push({

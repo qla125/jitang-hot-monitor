@@ -2,22 +2,20 @@ import { useMemo, useState } from 'react'
 import type { HotTopic, TopicCategory } from '@/types'
 
 export type SortBy =
-  | 'newest-created'    // 最新发现
-  | 'newest-published'  // 最新发布
-  | 'priority'          // 重要程度优先
-  | 'relevance'         // 相关性最高
-  | 'heat'              // 热度综合排名
+  | 'newest'      // 最新（发布时间优先，无发布时间则用入库时间）
+  | 'priority'    // 重要程度优先（score DESC，alert_count 次之）
+  | 'relevance'   // 相关性最高（alert_count DESC，score 次之）
+  | 'heat'        // 热度综合（score × 时间衰减）
 
 export type Priority = 'all' | 'urgent' | 'high' | 'medium' | 'low'
 export type Authenticity = 'all' | 'verified' | 'suspicious'
 export type TimeRange = 'all' | '1h' | 'today' | '7d' | '30d'
 
 export const SORT_LABELS: Record<SortBy, string> = {
-  'newest-created':   '最新发现',
-  'newest-published': '最新发布',
-  priority:           '重要程度优先',
-  relevance:          '相关性最高',
-  heat:               '热度综合排名',
+  newest:   '最新',
+  priority: '重要程度优先',
+  relevance:'相关性最高',
+  heat:     '热度综合排名',
 }
 
 export const PRIORITY_LABELS: Record<Priority, string> = {
@@ -42,7 +40,7 @@ export interface FilterState {
 }
 
 export const DEFAULT_FILTERS: FilterState = {
-  sortBy: 'newest-created',
+  sortBy: 'newest',
   sources: [],
   priority: 'all',
   keyword: '',
@@ -70,12 +68,10 @@ export function getSourceTag(source: string): string {
 
 export function getPriority(score: number): 'urgent' | 'high' | 'medium' | 'low' {
   if (score >= 9) return 'urgent'
-  if (score >= 7) return 'high'
-  if (score >= 5) return 'medium'
+  if (score >= 8) return 'high'
+  if (score >= 6) return 'medium'
   return 'low'
 }
-
-const PRIORITY_ORDER: Record<string, number> = { urgent: 4, high: 3, medium: 2, low: 1 }
 
 function getAuthenticity(topic: HotTopic): 'verified' | 'suspicious' | 'unknown' {
   if (topic.score >= 7 || topic.alert_count > 0) return 'verified'
@@ -95,9 +91,19 @@ function isInTimeRange(dateStr: string | undefined, range: TimeRange): boolean {
   return true
 }
 
-// "热度综合" 计算：score 本身已经综合了来源权重，这里略加一点加速度（alert触发加成）
-function heatScore(topic: HotTopic): number {
-  return topic.score * 10 + (topic.alert_count > 0 ? 15 : 0)
+// 热度 = score 减去时间衰减（每过 1 小时衰减 0.05 分，48h 后衰减 2.4 分）
+export function heatScore(topic: HotTopic): number {
+  const hoursAgo = (Date.now() - new Date(topic.created_at).getTime()) / (1000 * 3600)
+  return topic.score - hoursAgo * 0.05
+}
+
+// 最新排序用的时间戳：有发布时间用发布时间，否则用入库时间
+function newestTime(topic: HotTopic): number {
+  if (topic.published_at) {
+    const t = new Date(topic.published_at).getTime()
+    if (!isNaN(t)) return t
+  }
+  return new Date(topic.created_at).getTime()
 }
 
 // ── 主筛选 + 排序逻辑 ──────────────────────────────────────────────────────────
@@ -148,17 +154,18 @@ export function applyFiltersAndSort(
   // 排序
   result.sort((a, b) => {
     switch (filters.sortBy) {
-      case 'newest-created':
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      case 'newest-published':
-        return (
-          new Date(b.published_at || b.created_at).getTime() -
-          new Date(a.published_at || a.created_at).getTime()
-        )
+      case 'newest':
+        return newestTime(b) - newestTime(a)
       case 'priority':
-        return PRIORITY_ORDER[getPriority(b.score)] - PRIORITY_ORDER[getPriority(a.score)]
+        // 主：score 高分优先；次：触发关键词数量多的优先
+        return b.score !== a.score
+          ? b.score - a.score
+          : b.alert_count - a.alert_count
       case 'relevance':
-        return b.score - a.score
+        // 主：触发关键词数量多的优先；次：score 高分优先
+        return b.alert_count !== a.alert_count
+          ? b.alert_count - a.alert_count
+          : b.score - a.score
       case 'heat':
         return heatScore(b) - heatScore(a)
       default:
