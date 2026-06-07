@@ -1,11 +1,21 @@
-import { ExternalLink, Flame, Eye, Zap, TrendingUp, Minus } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import {
+  ExternalLink, Flame, Eye, Zap, TrendingUp, Minus,
+  User, BadgeCheck, AlertTriangle, ChevronDown,
+  Heart, MessageCircle, Repeat2, Lightbulb,
+} from 'lucide-react'
 import { CardSpotlight } from '@/components/aceternity/card-spotlight'
 import { cn } from '@/lib/utils'
-import { getPriority, heatScore } from '@/hooks/useTopicFilters'
+import {
+  getPriority, getAuthenticity, heatScore, formatRelativeTime, formatFollowers,
+} from '@/hooks/useTopicFilters'
 import type { HotTopic, TopicCategory } from '@/types'
 import type { SortBy } from '@/hooks/useTopicFilters'
 
-interface Props { topic: HotTopic; sortMode?: SortBy }
+// 全局「一键展开/折叠所有」信号：version 每次变化时，所有卡片同步到 expand 状态
+export interface ExpandSignal { expand: boolean; version: number }
+
+interface Props { topic: HotTopic; sortMode?: SortBy; expandSignal?: ExpandSignal | null }
 
 const CATEGORY: Record<TopicCategory, { label: string; dot: string }> = {
   'model-release': { label: '模型发布', dot: 'bg-matcha-400' },
@@ -69,6 +79,99 @@ function RelevanceEye({ score, alertCount }: { score: number; alertCount: number
   )
 }
 
+// ── 作者信息（名称 / 粉丝数 / 认证状态）────────────────────────────────────────
+
+function AuthorBadge({ name, followers, verified }: { name: string; followers: number; verified: boolean }) {
+  if (!name) return null
+  return (
+    <div className="flex items-center gap-1 mb-1.5 text-[10px] font-mono text-matcha-400 min-w-0">
+      <User size={10} className="text-matcha-300 shrink-0" />
+      <span className="text-matcha-500 truncate max-w-[140px]">{name}</span>
+      {verified && <BadgeCheck size={11} className="text-matcha-500 shrink-0" />}
+      {followers > 0 && (
+        <span className="text-matcha-300 shrink-0">· {formatFollowers(followers)}粉丝</span>
+      )}
+    </div>
+  )
+}
+
+// ── 互动数据（点赞 / 评论 / 转发 / 浏览）────────────────────────────────────────
+
+function InteractionStats({ topic }: { topic: HotTopic }) {
+  const stats = [
+    { Icon: Heart, value: topic.like_count || 0, label: '赞' },
+    { Icon: MessageCircle, value: topic.comment_count || 0, label: '评论' },
+    { Icon: Repeat2, value: topic.share_count || 0, label: '转发' },
+    { Icon: Eye, value: topic.view_count || 0, label: '浏览' },
+  ].filter(s => s.value > 0)
+  if (stats.length === 0) return null
+  return (
+    <span className="flex items-center gap-1.5">
+      {stats.map(({ Icon, value, label }) => (
+        <span key={label} title={label} className="flex items-center gap-0.5">
+          <Icon size={10} />
+          {formatFollowers(value)}
+        </span>
+      ))}
+    </span>
+  )
+}
+
+// ── AI 相关性理由 ──────────────────────────────────────────────────────────────
+
+function RelevanceReason({ reason }: { reason: string }) {
+  if (!reason) return null
+  return (
+    <p className="flex items-start gap-1 text-[10px] font-mono text-matcha-300 mb-1.5">
+      <Lightbulb size={10} className="shrink-0 mt-0.5 text-amber-400" />
+      <span className="line-clamp-1">{reason}</span>
+    </p>
+  )
+}
+
+// ── 真实性警告标记 ─────────────────────────────────────────────────────────────
+
+function AuthenticityWarning() {
+  return (
+    <span className="inline-flex items-center gap-0.5 font-mono font-semibold text-[9px] border rounded-md px-1.5 py-0.5 leading-none text-amber-600 bg-amber-50 border-amber-200">
+      <AlertTriangle size={9} />
+      疑似虚假
+    </span>
+  )
+}
+
+// ── 原始内容折叠展开 ───────────────────────────────────────────────────────────
+
+function ExpandableContent({ content, expandSignal }: { content: string; expandSignal?: ExpandSignal | null }) {
+  const [expanded, setExpanded] = useState(false)
+  const lastVersion = useRef(-1)
+
+  // 收到「一键展开/折叠所有」信号时，同步本卡片状态；之后用户仍可单独切换
+  useEffect(() => {
+    if (expandSignal && expandSignal.version !== lastVersion.current) {
+      lastVersion.current = expandSignal.version
+      setExpanded(expandSignal.expand)
+    }
+  }, [expandSignal])
+
+  return (
+    <div className="mt-1.5 pt-1.5 border-t border-cream-200/60">
+      <button
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setExpanded(v => !v) }}
+        className="flex items-center gap-1 text-[10px] font-mono text-matcha-300 hover:text-matcha-500 transition-colors"
+      >
+        <ChevronDown size={11} className={cn('transition-transform', expanded && 'rotate-180')} />
+        {expanded ? '收起原文' : '查看原文'}
+      </button>
+      {expanded && (
+        <p className="mt-1.5 text-matcha-400 text-xs leading-relaxed whitespace-pre-wrap max-h-40 overflow-y-auto">
+          {content}
+        </p>
+      )}
+    </div>
+  )
+}
+
 // ── 默认分数 chip ──────────────────────────────────────────────────────────────
 
 function ScoreChip({ score, isAlert }: { score: number; isAlert: boolean }) {
@@ -87,9 +190,12 @@ function ScoreChip({ score, isAlert }: { score: number; isAlert: boolean }) {
 
 // ── 主组件 ─────────────────────────────────────────────────────────────────────
 
-export default function HotTopicCard({ topic, sortMode }: Props) {
+export default function HotTopicCard({ topic, sortMode, expandSignal }: Props) {
   const meta = CATEGORY[topic.category] || CATEGORY.other
   const isAlert = topic.alert_count > 0
+  const suspicious = getAuthenticity(topic) === 'suspicious'
+  const rawContent = topic.raw_content?.trim() || ''
+  const showRawContent = rawContent.length > 0 && rawContent !== topic.title.trim()
 
   return (
     <a href={topic.url} target="_blank" rel="noopener noreferrer" className="block group">
@@ -110,6 +216,7 @@ export default function HotTopicCard({ topic, sortMode }: Props) {
               <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', meta.dot)} />
               <span className="text-[10px] font-mono text-matcha-400 tracking-wide">{meta.label}</span>
               {sortMode === 'priority' && <PriorityBadge score={topic.score} isAlert={isAlert} />}
+              {suspicious && <AuthenticityWarning />}
               {isAlert && (
                 <span className="text-[10px] font-mono text-clay-500 bg-clay-400/10 border border-clay-400/20 px-1.5 py-0.5 rounded-md">
                   ⚡ 命中
@@ -125,27 +232,38 @@ export default function HotTopicCard({ topic, sortMode }: Props) {
               {topic.title}
             </h3>
 
+            <AuthorBadge
+              name={topic.author_name || ''}
+              followers={topic.author_followers || 0}
+              verified={!!topic.author_verified}
+            />
+
             {topic.summary && (
-              <p className="text-matcha-400 text-xs leading-relaxed line-clamp-1 mb-2">
+              <p className="text-matcha-400 text-xs leading-relaxed line-clamp-1 mb-1.5">
+                <span className="text-matcha-300 font-semibold mr-1">[AI 摘要]</span>
                 {topic.summary}
               </p>
             )}
 
+            <RelevanceReason reason={topic.relevance_reason || ''} />
+
             <div className="flex items-center gap-1.5 text-[10px] font-mono text-matcha-300">
               <span>{topic.source}</span>
               <span>·</span>
-              <span>
-                {new Date(topic.created_at).toLocaleString('zh-CN', {
-                  month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
-                })}
-              </span>
-
-              {sortMode === 'heat' && (
+              {topic.published_at && (
                 <>
+                  <span title={new Date(topic.published_at).toLocaleString('zh-CN')}>
+                    发布{formatRelativeTime(topic.published_at)}
+                  </span>
                   <span>·</span>
-                  <HeatBar value={heatScore(topic)} />
                 </>
               )}
+              <span title={new Date(topic.created_at).toLocaleString('zh-CN')}>
+                抓取{formatRelativeTime(topic.created_at)}
+              </span>
+
+              <span>·</span>
+              <HeatBar value={heatScore(topic)} />
 
               {sortMode === 'relevance' && (
                 <>
@@ -153,7 +271,11 @@ export default function HotTopicCard({ topic, sortMode }: Props) {
                   <RelevanceEye score={topic.score} alertCount={topic.alert_count} />
                 </>
               )}
+
+              <InteractionStats topic={topic} />
             </div>
+
+            {showRawContent && <ExpandableContent content={rawContent} expandSignal={expandSignal} />}
           </div>
         </div>
       </CardSpotlight>

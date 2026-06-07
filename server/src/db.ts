@@ -43,7 +43,16 @@ db.exec(`
     score INTEGER DEFAULT 5,
     category TEXT DEFAULT 'other',
     published_at TEXT,
-    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+    created_at TEXT DEFAULT (datetime('now', 'localtime')),
+    author_name TEXT DEFAULT '',
+    author_followers INTEGER DEFAULT 0,
+    author_verified INTEGER DEFAULT 0,
+    like_count INTEGER DEFAULT 0,
+    comment_count INTEGER DEFAULT 0,
+    share_count INTEGER DEFAULT 0,
+    view_count INTEGER DEFAULT 0,
+    relevance_reason TEXT DEFAULT '',
+    authenticity TEXT DEFAULT 'unknown'
   );
 
   CREATE TABLE IF NOT EXISTS alerts (
@@ -72,6 +81,23 @@ db.exec(`
     first_seen TEXT DEFAULT (datetime('now', 'localtime'))
   );
 `);
+
+// 旧库兼容：CREATE TABLE IF NOT EXISTS 不会给已存在的表新增列，需手动迁移
+function ensureColumn(table: string, column: string, definition: string) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+ensureColumn('hot_topics', 'author_name', "TEXT DEFAULT ''");
+ensureColumn('hot_topics', 'author_followers', 'INTEGER DEFAULT 0');
+ensureColumn('hot_topics', 'author_verified', 'INTEGER DEFAULT 0');
+ensureColumn('hot_topics', 'like_count', 'INTEGER DEFAULT 0');
+ensureColumn('hot_topics', 'comment_count', 'INTEGER DEFAULT 0');
+ensureColumn('hot_topics', 'share_count', 'INTEGER DEFAULT 0');
+ensureColumn('hot_topics', 'view_count', 'INTEGER DEFAULT 0');
+ensureColumn('hot_topics', 'relevance_reason', "TEXT DEFAULT ''");
+ensureColumn('hot_topics', 'authenticity', "TEXT DEFAULT 'unknown'");
 
 const defaultSettings: Record<string, string> = {
   email_enabled: 'false',
@@ -110,15 +136,22 @@ export const q = {
 
   // Hot topics
   insertHotTopic: db.prepare(
-    'INSERT INTO hot_topics (raw_item_id, title, url, source, summary, score, category, published_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    `INSERT INTO hot_topics
+      (raw_item_id, title, url, source, summary, score, category, published_at,
+       author_name, author_followers, author_verified,
+       like_count, comment_count, share_count, view_count,
+       relevance_reason, authenticity)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ),
   getRecentTopics: (hours = 720) =>
     db
       .prepare(
         `SELECT ht.*,
+          ri.content as raw_content,
           (SELECT COUNT(*) FROM alerts a WHERE a.hot_topic_id = ht.id) as alert_count,
           (SELECT GROUP_CONCAT(DISTINCT a.keyword_text) FROM alerts a WHERE a.hot_topic_id = ht.id) as alert_keywords
          FROM hot_topics ht
+         LEFT JOIN raw_items ri ON ri.id = ht.raw_item_id
          WHERE ht.created_at > datetime('now', '-' || ? || ' hours', 'localtime')
          ORDER BY ht.score DESC, ht.created_at DESC
          LIMIT 200`

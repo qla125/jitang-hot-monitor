@@ -216,7 +216,7 @@ export default function FilterSortBar({ filters, updateFilter, resetFilters, act
         ))}
         <Divider />
         <p className="px-3 py-1.5 text-[9px] text-matcha-200 font-mono leading-relaxed">
-          基于 AI 评分 (≥7分=已验证, ≤2分=疑似虚假)
+          优先采用 AI 对内容可信度的判断；无判断结果时按评分推断 (≥7分=已验证, ≤2分=疑似虚假)
         </p>
       </Dropdown>
 

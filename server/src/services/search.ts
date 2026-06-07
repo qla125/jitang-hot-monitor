@@ -11,11 +11,13 @@ interface TwitterHit {
   createdAt: string;
   likeCount?: number;
   retweetCount?: number;
+  replyCount?: number;
+  quoteCount?: number;
   viewCount?: number;
   isReply?: boolean;
   retweeted_tweet?: unknown;
   quoted_tweet?: unknown;
-  author?: { userName?: string; followers?: number };
+  author?: { userName?: string; followers?: number; isBlueVerified?: boolean; isVerified?: boolean };
 }
 
 interface SerperHit {
@@ -32,8 +34,13 @@ interface BilibiliHit {
   content: string;
   source: string;
   play: number;
+  danmaku?: number;
+  review?: number;
   isAccountMatch: boolean;
   publishedAt: string;
+  authorName?: string;
+  authorFollowers?: number;
+  authorVerified?: boolean;
 }
 
 interface WeiboHit {
@@ -42,8 +49,13 @@ interface WeiboHit {
   content: string;
   source: string;
   likesCount: number;
+  repostsCount?: number;
+  commentsCount?: number;
   isAccountMatch: boolean;
   publishedAt: string;
+  authorName?: string;
+  authorFollowers?: number;
+  authorVerified?: boolean;
 }
 
 // 7 天新鲜度过滤：有发布时间且超过 7 天的结果直接丢弃
@@ -184,6 +196,9 @@ async function searchBilibiliHits(keyword: string, limit = 6): Promise<BilibiliH
       const fansLabel = (matchedUser.fans || 0) >= 10000
         ? `${((matchedUser.fans || 0) / 10000).toFixed(1)}万粉`
         : `${matchedUser.fans || 0}粉`;
+      const authorName = matchedUser.uname || '';
+      const authorFollowers = matchedUser.fans || 0;
+      const authorVerified = !!matchedUser.official_verify && matchedUser.official_verify.type !== -1;
 
       // 尝试拉取该用户的最新视频
       try {
@@ -200,8 +215,11 @@ async function searchBilibiliHits(keyword: string, limit = 6): Promise<BilibiliH
             content: v.description || '',
             source: `Bilibili @${matchedUser.uname}（${fansLabel}）`,
             play: v.play || 0,
+            danmaku: v.danmaku || 0,
+            review: v.comment || v.review || 0,
             isAccountMatch: true,
             publishedAt: new Date((v.created || 0) * 1000).toISOString(),
+            authorName, authorFollowers, authorVerified,
           });
         }
       } catch {
@@ -213,8 +231,11 @@ async function searchBilibiliHits(keyword: string, limit = 6): Promise<BilibiliH
             content: v.description || '',
             source: `Bilibili @${matchedUser.uname}（${fansLabel}）`,
             play: v.play || 0,
+            danmaku: v.danmaku || 0,
+            review: v.review || 0,
             isAccountMatch: true,
             publishedAt: new Date((v.pubdate || 0) * 1000).toISOString(),
+            authorName, authorFollowers, authorVerified,
           });
         }
       }
@@ -229,8 +250,11 @@ async function searchBilibiliHits(keyword: string, limit = 6): Promise<BilibiliH
         content: v.description || '',
         source: `Bilibili（${(v.play || 0).toLocaleString()}播放）`,
         play: v.play || 0,
+        danmaku: v.danmaku || 0,
+        review: v.review || 0,
         isAccountMatch: false,
         publishedAt: new Date((v.pubdate || 0) * 1000).toISOString(),
+        authorName: v.author || '',
       });
     }
   } catch (e) {
@@ -280,6 +304,9 @@ async function searchWeiboHits(keyword: string, limit = 6): Promise<WeiboHit[]> 
       const fansLabel = u.followers_count >= 10000
         ? `${(u.followers_count / 10000).toFixed(1)}万粉`
         : `${u.followers_count || 0}粉`;
+      const authorName = u.screen_name || '';
+      const authorFollowers = u.followers_count || 0;
+      const authorVerified = !!u.verified;
 
       for (const c of cards.filter((c: any) => c.mblog).slice(0, limit)) {
         const mb = c.mblog;
@@ -290,8 +317,11 @@ async function searchWeiboHits(keyword: string, limit = 6): Promise<WeiboHit[]> 
           content: text,
           source: `微博 @${u.screen_name}（${fansLabel}）`,
           likesCount: mb.attitudes_count || 0,
+          repostsCount: mb.reposts_count || 0,
+          commentsCount: mb.comments_count || 0,
           isAccountMatch: true,
           publishedAt: new Date(mb.created_at || Date.now()).toISOString(),
+          authorName, authorFollowers, authorVerified,
         });
       }
       return hits;
@@ -325,8 +355,13 @@ async function searchWeiboHits(keyword: string, limit = 6): Promise<WeiboHit[]> 
         content: text,
         source: `微博（${mb.attitudes_count || 0}❤）`,
         likesCount: mb.attitudes_count || 0,
+        repostsCount: mb.reposts_count || 0,
+        commentsCount: mb.comments_count || 0,
         isAccountMatch: false,
         publishedAt: new Date(mb.created_at || Date.now()).toISOString(),
+        authorName: user.screen_name || '',
+        authorFollowers: user.followers_count || 0,
+        authorVerified: !!user.verified,
       });
     }
   } catch (e) {
@@ -375,13 +410,18 @@ async function searchHackerNews(keyword: string, limit = 5): Promise<SearchHit[]
 async function insertMatchedItem(
   source: string, title: string, url: string, content: string,
   publishedAt: string, score: number, category: string,
-  keyword: string, kw: any, confidence: number, reason: string
+  keyword: string, kw: any, confidence: number, reason: string,
+  authorName = '', authorFollowers = 0, authorVerified = false,
+  likeCount = 0, commentCount = 0, shareCount = 0, viewCount = 0
 ) {
   const insertResult = q.insertRawItem.run(source, title.slice(0, 500), url, content.slice(0, 2000), publishedAt);
   if ((insertResult as any).changes > 0) {
     try {
       const topicInfo = q.insertHotTopic.run(
-        (insertResult as any).lastInsertRowid, title, url, source, '', score, category, publishedAt
+        (insertResult as any).lastInsertRowid, title, url, source, '', score, category, publishedAt,
+        authorName, authorFollowers, authorVerified ? 1 : 0,
+        likeCount, commentCount, shareCount, viewCount,
+        '', 'unknown'
       );
       const topicId = topicInfo.lastInsertRowid as number;
       if (kw && !q.checkDuplicateAlert(kw.id, topicId)) {
@@ -420,10 +460,12 @@ export async function searchKeyword(keyword: string): Promise<KeywordSearchResul
 
     let matched = false;
     let confidence = 0;
+    let reason = 'twitter keyword match';
     try {
       const verification = await verifyKeywordMatch(content, keyword);
       matched = verification.matched && verification.confidence >= 0.6;
       confidence = verification.confidence;
+      reason = verification.reason || reason;
     } catch {
       matched = tweet.text.toLowerCase().includes(keyword.toLowerCase());
       confidence = matched ? 0.7 : 0;
@@ -441,11 +483,19 @@ export async function searchKeyword(keyword: string): Promise<KeywordSearchResul
             (insertResult as any).lastInsertRowid, title, url,
             'Twitter/X Search', '',
             Math.min(10, Math.round((tweet.likeCount || 0) / 50) + 4),
-            'discussion', tweet.createdAt || new Date().toISOString()
+            'discussion', tweet.createdAt || new Date().toISOString(),
+            tweet.author?.userName || '',
+            tweet.author?.followers || 0,
+            (tweet.author?.isBlueVerified || tweet.author?.isVerified) ? 1 : 0,
+            tweet.likeCount || 0,
+            tweet.replyCount || 0,
+            (tweet.retweetCount || 0) + (tweet.quoteCount || 0),
+            tweet.viewCount || 0,
+            '', 'unknown'
           );
           const topicId = topicInfo.lastInsertRowid as number;
           if (kw && !q.checkDuplicateAlert(kw.id, topicId)) {
-            q.insertAlert.run(kw.id, keyword, topicId, title, url, confidence, 'twitter keyword match');
+            q.insertAlert.run(kw.id, keyword, topicId, title, url, confidence, reason);
             await notifyAlert({ keyword, title, url, summary: '', confidence });
           }
         } catch { /* duplicate */ }
@@ -467,10 +517,12 @@ export async function searchKeyword(keyword: string): Promise<KeywordSearchResul
 
     let matched = false;
     let confidence = 0;
+    let reason = 'keyword search match';
     try {
       const verification = await verifyKeywordMatch(content, keyword);
       matched = verification.matched && verification.confidence >= 0.6;
       confidence = verification.confidence;
+      reason = verification.reason || reason;
     } catch {
       matched = hit.title.toLowerCase().includes(keyword.toLowerCase());
       confidence = matched ? 0.7 : 0;
@@ -488,11 +540,14 @@ export async function searchKeyword(keyword: string): Promise<KeywordSearchResul
             (insertResult as any).lastInsertRowid, hit.title, url,
             'HackerNews Search', '',
             Math.min(10, Math.round((hit.points || 0) / 20) + 4),
-            'discussion', hit.created_at
+            'discussion', hit.created_at,
+            hit.author || '', 0, 0,
+            hit.points || 0, hit.num_comments || 0, 0, 0,
+            '', 'unknown'
           );
           const topicId = topicInfo.lastInsertRowid as number;
           if (kw && !q.checkDuplicateAlert(kw.id, topicId)) {
-            q.insertAlert.run(kw.id, keyword, topicId, hit.title, url, confidence, 'keyword search match');
+            q.insertAlert.run(kw.id, keyword, topicId, hit.title, url, confidence, reason);
             await notifyAlert({ keyword, title: hit.title, url, summary: '', confidence });
           }
         } catch { /* duplicate */ }
@@ -517,10 +572,12 @@ export async function searchKeyword(keyword: string): Promise<KeywordSearchResul
 
     let matched = false;
     let confidence = 0;
+    let reason = 'google news keyword match';
     try {
       const verification = await verifyKeywordMatch(content, keyword);
       matched = verification.matched && verification.confidence >= 0.6;
       confidence = verification.confidence;
+      reason = verification.reason || reason;
     } catch {
       matched = item.title.toLowerCase().includes(keyword.toLowerCase());
       confidence = matched ? 0.7 : 0;
@@ -537,11 +594,14 @@ export async function searchKeyword(keyword: string): Promise<KeywordSearchResul
           const topicInfo = q.insertHotTopic.run(
             (insertResult as any).lastInsertRowid, item.title, url,
             `Google News${item.source ? ' · ' + item.source : ''}`, '',
-            6, 'other', publishedAt
+            6, 'other', publishedAt,
+            '', 0, 0,
+            0, 0, 0, 0,
+            '', 'unknown'
           );
           const topicId = topicInfo.lastInsertRowid as number;
           if (kw && !q.checkDuplicateAlert(kw.id, topicId)) {
-            q.insertAlert.run(kw.id, keyword, topicId, item.title, url, confidence, 'google news keyword match');
+            q.insertAlert.run(kw.id, keyword, topicId, item.title, url, confidence, reason);
             await notifyAlert({ keyword, title: item.title, url, summary: item.snippet || '', confidence });
           }
         } catch { /* duplicate */ }
@@ -568,7 +628,9 @@ export async function searchKeyword(keyword: string): Promise<KeywordSearchResul
       await insertMatchedItem(
         hit.source, hit.title, hit.url, hit.content, hit.publishedAt,
         Math.min(10, Math.round((hit.play || 0) / 5000) + 4),
-        'tool-update', keyword, kw, confidence, 'bilibili match'
+        'tool-update', keyword, kw, confidence, 'bilibili match',
+        hit.authorName, hit.authorFollowers, hit.authorVerified,
+        0, (hit.danmaku || 0) + (hit.review || 0), 0, hit.play || 0
       );
     }
     result.items.push({ title: hit.title, url: hit.url, source: hit.source, points: hit.play, matched, confidence });
@@ -586,7 +648,9 @@ export async function searchKeyword(keyword: string): Promise<KeywordSearchResul
       await insertMatchedItem(
         hit.source, hit.title, hit.url, hit.content, hit.publishedAt,
         Math.min(10, Math.round((hit.likesCount || 0) / 100) + 4),
-        'discussion', keyword, kw, confidence, 'weibo match'
+        'discussion', keyword, kw, confidence, 'weibo match',
+        hit.authorName, hit.authorFollowers, hit.authorVerified,
+        hit.likesCount || 0, hit.commentsCount || 0, hit.repostsCount || 0, 0
       );
     }
     result.items.push({ title: hit.title, url: hit.url, source: hit.source, points: hit.likesCount, matched, confidence });
@@ -601,10 +665,12 @@ export async function searchKeyword(keyword: string): Promise<KeywordSearchResul
     const content = `${item.title}\n${item.snippet || ''}`;
     let matched = false;
     let confidence = 0;
+    let reason = 'baidu news match';
     try {
       const v = await verifyKeywordMatch(content, keyword);
       matched = v.matched && v.confidence >= 0.6;
       confidence = v.confidence;
+      reason = v.reason || reason;
     } catch {
       matched = item.title.toLowerCase().includes(keyword.toLowerCase());
       confidence = matched ? 0.7 : 0;
@@ -614,7 +680,7 @@ export async function searchKeyword(keyword: string): Promise<KeywordSearchResul
       await insertMatchedItem(
         `百度新闻${item.source ? ' · ' + item.source : ''}`,
         item.title, item.link, item.snippet || '', publishedAt,
-        6, 'other', keyword, kw, confidence, 'baidu news match'
+        6, 'other', keyword, kw, confidence, reason
       );
     }
     result.items.push({

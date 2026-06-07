@@ -13,6 +13,8 @@ export interface AnalysisResult {
   score: number;
   summary: string;
   category: 'model-release' | 'tool-update' | 'research' | 'funding' | 'discussion' | 'other';
+  reason: string;
+  authenticity: 'real' | 'suspicious' | 'unknown';
 }
 
 export interface KeywordVerifyResult {
@@ -79,11 +81,13 @@ ${itemsText}
 - score: 热度分数 1-10（10=必看重磅新闻如GPT-5发布、Claude 4等；7-9=重要更新；4-6=一般资讯；1-3=无关紧要）
 - summary: 一句话中文摘要（不超过30字，突出核心价值）
 - category: 必须是以下之一：model-release(模型发布/更新)、tool-update(工具/产品更新)、research(研究/论文)、funding(融资/商业)、discussion(社区讨论)、other(其他)
+- reason: 一句话说明为什么值得关注/给出这个分数（不超过20字，例如"性能超越GPT-4"、"首个开源多模态模型"、"行业影响有限"）
+- authenticity: 对信息可信度的判断，必须是以下之一：real(信息源可靠、有实质内容)、suspicious(疑似营销软文/标题党/未经证实的传闻)、unknown(信息不足以判断)
 
 只返回合法JSON数组，不要其他任何文字：`;
 
   const response = await chat(prompt);
-  const results = safeParseJSON<Array<{ index: number; score: number; summary: string; category: string }>>(
+  const results = safeParseJSON<Array<{ index: number; score: number; summary: string; category: string; reason: string; authenticity: string }>>(
     response,
     []
   );
@@ -94,6 +98,8 @@ ${itemsText}
       score: 5,
       summary: item.title.slice(0, 40),
       category: 'other' as const,
+      reason: '',
+      authenticity: 'unknown' as const,
     }));
   }
 
@@ -103,6 +109,8 @@ ${itemsText}
       score: Math.min(10, Math.max(1, r.score || 5)),
       summary: r.summary || '',
       category: (r.category as AnalysisResult['category']) || 'other',
+      reason: r.reason || '',
+      authenticity: (['real', 'suspicious', 'unknown'].includes(r.authenticity) ? r.authenticity : 'unknown') as AnalysisResult['authenticity'],
     }))
     .filter((r) => r.id !== undefined) as AnalysisResult[];
 }

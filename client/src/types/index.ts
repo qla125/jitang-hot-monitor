@@ -27,6 +27,16 @@ export interface HotTopic {
   created_at: string
   alert_count: number
   alert_keywords?: string
+  raw_content?: string
+  author_name?: string
+  author_followers?: number
+  author_verified?: number
+  like_count?: number
+  comment_count?: number
+  share_count?: number
+  view_count?: number
+  relevance_reason?: string
+  authenticity?: 'real' | 'suspicious' | 'unknown'
 }
 
 export interface Alert {

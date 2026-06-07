@@ -15,7 +15,7 @@ export async function processNewItems(): Promise<number> {
   console.log(`[Monitor] Processing ${unprocessed.length} items...`);
 
   // AI analysis in batches
-  const allResults: Array<{ id: number; score: number; summary: string; category: string }> = [];
+  const allResults: Array<{ id: number; score: number; summary: string; category: string; reason: string; authenticity: string }> = [];
   for (let i = 0; i < unprocessed.length; i += BATCH_SIZE) {
     const batch = unprocessed.slice(i, i + BATCH_SIZE);
     try {
@@ -31,7 +31,7 @@ export async function processNewItems(): Promise<number> {
     } catch (e) {
       console.warn('[Monitor] AI batch failed, using fallback:', (e as Error).message);
       batch.forEach((item: any) =>
-        allResults.push({ id: item.id, score: 5, summary: item.title.slice(0, 40), category: 'other' })
+        allResults.push({ id: item.id, score: 5, summary: item.title.slice(0, 40), category: 'other', reason: '', authenticity: 'unknown' })
       );
     }
   }
@@ -51,7 +51,11 @@ export async function processNewItems(): Promise<number> {
         result.summary,
         result.score,
         result.category,
-        rawItem.published_at
+        rawItem.published_at,
+        '', 0, 0,           // 作者信息：常规抓取管线无结构化数据
+        0, 0, 0, 0,         // 互动数据：raw_items 未携带结构化点赞/评论/转发/浏览数
+        result.reason,
+        result.authenticity
       );
       insertedTopics.push({ topicId: info.lastInsertRowid as number, rawItem, result });
     } catch {

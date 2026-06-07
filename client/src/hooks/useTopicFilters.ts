@@ -73,10 +73,36 @@ export function getPriority(score: number): 'urgent' | 'high' | 'medium' | 'low'
   return 'low'
 }
 
-function getAuthenticity(topic: HotTopic): 'verified' | 'suspicious' | 'unknown' {
+// 真实性判断：优先采用 AI 对内容本身的可信度判断（authenticity 字段）；
+// 该字段缺失时（如关键词搜索直接入库的条目，未经过 AI 逐条分析），退化为基于分数/告警命中的启发式推断
+export function getAuthenticity(topic: HotTopic): 'verified' | 'suspicious' | 'unknown' {
+  if (topic.authenticity === 'real') return 'verified'
+  if (topic.authenticity === 'suspicious') return 'suspicious'
   if (topic.score >= 7 || topic.alert_count > 0) return 'verified'
   if (topic.score <= 2) return 'suspicious'
   return 'unknown'
+}
+
+// 相对时间："刚刚" / "5分钟前" / "3小时前" / "2天前"，超过 30 天显示日期
+export function formatRelativeTime(dateStr: string | undefined): string {
+  if (!dateStr) return ''
+  const t = new Date(dateStr).getTime()
+  if (isNaN(t)) return ''
+  const diffMs = Date.now() - t
+  const minutes = Math.floor(diffMs / 60000)
+  if (minutes < 1) return '刚刚'
+  if (minutes < 60) return `${minutes}分钟前`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}小时前`
+  const days = Math.floor(hours / 24)
+  if (days < 30) return `${days}天前`
+  return new Date(dateStr).toLocaleDateString('zh-CN', { year: 'numeric', month: 'numeric', day: 'numeric' })
+}
+
+// 粉丝数简写："12.3万" / "5,200"
+export function formatFollowers(n: number): string {
+  if (n >= 10000) return `${(n / 10000).toFixed(1)}万`
+  return n.toLocaleString()
 }
 
 function isInTimeRange(dateStr: string | undefined, range: TimeRange): boolean {

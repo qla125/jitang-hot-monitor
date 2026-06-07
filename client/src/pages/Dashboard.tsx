@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 
 const PAGE_SIZE = 20
-import { RefreshCw, Settings, Bell, Zap, Radio, Search, ArrowUpDown } from 'lucide-react'
+import { RefreshCw, Settings, Bell, Zap, Radio, Search, ArrowUpDown, ChevronsDown, ChevronsUp } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { MovingBorderButton } from '@/components/aceternity/moving-border'
 import { BackgroundGrid } from '@/components/aceternity/background-grid'
 import RadarCanvas from '@/components/RadarCanvas'
-import HotTopicCard from '@/components/HotTopicCard'
+import HotTopicCard, { type ExpandSignal } from '@/components/HotTopicCard'
 import KeywordManager from '@/components/KeywordManager'
 import AlertBanner from '@/components/AlertBanner'
 import FilterSortBar from '@/components/FilterSortBar'
@@ -56,6 +56,9 @@ export default function Dashboard() {
   // 主列表排序/筛选
   const { filters, updateFilter, resetFilters, activeCount } = useTopicFilters()
   const [page, setPage] = useState(1)
+
+  // 「一键展开/折叠所有原文」全局信号：version 递增时所有卡片同步展开状态
+  const [expandSignal, setExpandSignal] = useState<ExpandSignal | null>(null)
 
   const loadTopics = useCallback(async () => {
     try {
@@ -122,6 +125,15 @@ export default function Dashboard() {
   const pagedTopics = useMemo(
     () => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
     [filtered, page],
+  )
+
+  // 当前页是否存在可展开的原文内容（无则不显示「展开/折叠全部」按钮）
+  const hasExpandableContent = useMemo(
+    () => pagedTopics.some(t => {
+      const raw = t.raw_content?.trim() || ''
+      return raw.length > 0 && raw !== t.title.trim()
+    }),
+    [pagedTopics],
   )
 
   // 当前数据库里存在的所有来源标签（去重）
@@ -322,12 +334,31 @@ export default function Dashboard() {
             </div>
           ) : (
             <>
+              {hasExpandableContent && (
+                <div className="flex items-center justify-end gap-1 mb-2">
+                  <button
+                    onClick={() => setExpandSignal(s => ({ expand: true, version: (s?.version ?? 0) + 1 }))}
+                    className="flex items-center gap-1 text-[10px] font-mono text-matcha-300 hover:text-matcha-600 px-2 py-1 rounded-lg hover:bg-matcha-50 transition-all"
+                  >
+                    <ChevronsDown size={11} />
+                    展开全部原文
+                  </button>
+                  <button
+                    onClick={() => setExpandSignal(s => ({ expand: false, version: (s?.version ?? 0) + 1 }))}
+                    className="flex items-center gap-1 text-[10px] font-mono text-matcha-300 hover:text-matcha-600 px-2 py-1 rounded-lg hover:bg-matcha-50 transition-all"
+                  >
+                    <ChevronsUp size={11} />
+                    折叠全部原文
+                  </button>
+                </div>
+              )}
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-2.5">
                 {pagedTopics.map(t => (
                   <HotTopicCard
                     key={t.id}
                     topic={t}
                     sortMode={filters.sortBy !== 'newest' ? filters.sortBy : undefined}
+                    expandSignal={expandSignal}
                   />
                 ))}
               </div>
