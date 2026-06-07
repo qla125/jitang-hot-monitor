@@ -2,7 +2,7 @@
 
 > AI 驱动的热点监控系统 — 让热点无法遁形
 
-[极客雷达界面预览]<img width="2560" height="1242" alt="编程导航 - 一站式程序员学习交流社区 和另外 24 个页面 - 个人 - Microsoft​ Edge 2026_6_6 4_54_01" src="https://github.com/user-attachments/assets/e0552078-f692-4b96-b4ef-fd880fd62e52" />
+[极客雷达界面预览]<img width="2560" height="1242" alt="编程导航 - 一站式程序员学习交流社区 和另外 25 个页面 - 个人 - Microsoft​ Edge 2026_6_7 6_16_54" src="https://github.com/user-attachments/assets/fb99305a-c3ad-4dee-bb82-c3da3df57e6b" />
 
 
 
