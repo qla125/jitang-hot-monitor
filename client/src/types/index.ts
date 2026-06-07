@@ -3,6 +3,7 @@ export interface Keyword {
   keyword: string
   description: string
   active: number
+  expanded_terms?: string // JSON 字符串数组，例如 '["扩展词1","扩展词2"]'
   created_at: string
 }
 

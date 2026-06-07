@@ -19,6 +19,7 @@ db.exec(`
     keyword TEXT NOT NULL,
     description TEXT DEFAULT '',
     active INTEGER DEFAULT 1,
+    expanded_terms TEXT DEFAULT '[]',
     created_at TEXT DEFAULT (datetime('now', 'localtime'))
   );
 
@@ -80,6 +81,16 @@ db.exec(`
     context_length INTEGER DEFAULT 0,
     first_seen TEXT DEFAULT (datetime('now', 'localtime'))
   );
+
+  CREATE TABLE IF NOT EXISTS keyword_match_cache (
+    url TEXT NOT NULL,
+    keyword TEXT NOT NULL,
+    matched INTEGER NOT NULL,
+    confidence REAL NOT NULL,
+    reason TEXT DEFAULT '',
+    checked_at TEXT DEFAULT (datetime('now', 'localtime')),
+    PRIMARY KEY (url, keyword)
+  );
 `);
 
 // 旧库兼容：CREATE TABLE IF NOT EXISTS 不会给已存在的表新增列，需手动迁移
@@ -98,6 +109,7 @@ ensureColumn('hot_topics', 'share_count', 'INTEGER DEFAULT 0');
 ensureColumn('hot_topics', 'view_count', 'INTEGER DEFAULT 0');
 ensureColumn('hot_topics', 'relevance_reason', "TEXT DEFAULT ''");
 ensureColumn('hot_topics', 'authenticity', "TEXT DEFAULT 'unknown'");
+ensureColumn('keywords', 'expanded_terms', "TEXT DEFAULT '[]'");
 
 const defaultSettings: Record<string, string> = {
   email_enabled: 'false',
@@ -121,8 +133,9 @@ export const q = {
   // Keywords
   getKeywords: () => db.prepare('SELECT * FROM keywords ORDER BY created_at DESC').all(),
   getActiveKeywords: () => db.prepare('SELECT * FROM keywords WHERE active = 1').all(),
-  insertKeyword: db.prepare('INSERT INTO keywords (keyword, description) VALUES (?, ?)'),
-  updateKeyword: db.prepare('UPDATE keywords SET keyword = ?, description = ?, active = ? WHERE id = ?'),
+  insertKeyword: db.prepare('INSERT INTO keywords (keyword, description, expanded_terms) VALUES (?, ?, ?)'),
+  updateKeyword: db.prepare('UPDATE keywords SET keyword = ?, description = ?, active = ?, expanded_terms = ? WHERE id = ?'),
+  updateKeywordExpansion: db.prepare('UPDATE keywords SET expanded_terms = ? WHERE id = ?'),
   deleteKeyword: db.prepare('DELETE FROM keywords WHERE id = ?'),
   getKeywordById: (id: number | string) => db.prepare('SELECT * FROM keywords WHERE id = ?').get(id),
 
@@ -188,6 +201,21 @@ export const q = {
   ),
   getKnownModelCount: () =>
     (db.prepare('SELECT COUNT(*) as cnt FROM known_models').get() as any).cnt as number,
+
+  // Keyword match cache（按 url+keyword 缓存 AI 验证结果，避免重复扫描时的冗余 AI 调用）
+  getCachedVerification: (url: string, keyword: string) =>
+    db
+      .prepare('SELECT matched, confidence, reason FROM keyword_match_cache WHERE url = ? AND keyword = ?')
+      .get(url, keyword) as { matched: number; confidence: number; reason: string } | undefined,
+  upsertVerificationCache: db.prepare(`
+    INSERT INTO keyword_match_cache (url, keyword, matched, confidence, reason)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(url, keyword) DO UPDATE SET
+      matched = excluded.matched,
+      confidence = excluded.confidence,
+      reason = excluded.reason,
+      checked_at = datetime('now', 'localtime')
+  `),
 };
 
 export default db;

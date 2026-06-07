@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { q } from '../db';
-import { verifyKeywordMatch } from './ai';
+import { verifyWithCache, type KeywordVerifyResult } from './ai';
 import { notifyAlert } from './notify';
 import { broadcastSSE } from './notify';
 
@@ -77,6 +77,72 @@ function unixDaysAgo(days: number) {
   return Math.floor(Date.now() / 1000) - days * 24 * 3600;
 }
 
+const MATCH_CONFIDENCE_THRESHOLD = 0.7;
+// 单一关键词搜索内，AI 相关性验证的最大并发数（避免一次性打满 OpenRouter 速率限制）
+const AI_VERIFY_CONCURRENCY = 5;
+
+// 限制并发数地批量执行异步任务，按完成顺序无关、按输入顺序收集结果
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const i = cursor++;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
+  return results;
+}
+
+function isMatched(v: KeywordVerifyResult): boolean {
+  return v.matched && v.confidence >= MATCH_CONFIDENCE_THRESHOLD;
+}
+
+function parseExpandedTerms(raw: unknown): string[] {
+  if (typeof raw !== 'string' || !raw.trim()) return [];
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.filter((t): t is string => typeof t === 'string' && t.trim().length > 0) : [];
+  } catch {
+    return [];
+  }
+}
+
+// 将关键词与扩展词拼接为 OR 查询，用于支持布尔语法的搜索源（Twitter / Google 系），单次调用即可扩大召回范围
+function buildOrQuery(keyword: string, expandedTerms: string[]): string {
+  const terms = [keyword, ...expandedTerms];
+  if (terms.length === 1) return keyword;
+  return terms.map((t) => (t.includes(' ') ? `"${t}"` : t)).join(' OR ');
+}
+
+// 不支持 OR 语法的免费搜索源：用关键词 + 排名第一的扩展词分别查询，按 key 去重并合并（优先保留关键词查询结果）
+async function searchWithExpansion<T>(
+  keyword: string,
+  expandedTerms: string[],
+  limit: number,
+  fetchFn: (query: string, limit: number) => Promise<T[]>,
+  keyOf: (item: T) => string
+): Promise<T[]> {
+  const primary = await fetchFn(keyword, limit);
+  if (expandedTerms.length === 0) return primary;
+
+  const extra = await fetchFn(expandedTerms[0], limit);
+  const seen = new Set(primary.map(keyOf).filter(Boolean));
+  const merged = [...primary];
+  for (const item of extra) {
+    if (merged.length >= limit) break;
+    const key = keyOf(item);
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+    merged.push(item);
+  }
+  return merged;
+}
 
 const stripHtml = (s: string) => s.replace(/<[^>]*>/g, '');
 
@@ -421,7 +487,7 @@ async function insertMatchedItem(
         (insertResult as any).lastInsertRowid, title, url, source, '', score, category, publishedAt,
         authorName, authorFollowers, authorVerified ? 1 : 0,
         likeCount, commentCount, shareCount, viewCount,
-        '', 'unknown'
+        reason, 'unknown'
       );
       const topicId = topicInfo.lastInsertRowid as number;
       if (kw && !q.checkDuplicateAlert(kw.id, topicId)) {
@@ -437,257 +503,281 @@ async function insertMatchedItem(
 export async function searchKeyword(keyword: string): Promise<KeywordSearchResult> {
   console.log(`[Search] Searching for: "${keyword}"`);
 
+  const kws = q.getActiveKeywords() as any[];
+  const kw = kws.find((k: any) => k.keyword === keyword);
+  const expandedTerms = parseExpandedTerms(kw?.expanded_terms);
+  // 支持布尔语法的搜索源（Twitter / Google 系）：单次 OR 查询扩大召回，不额外消耗配额
+  const orQuery = buildOrQuery(keyword, expandedTerms);
+
   const [twHits, hnHits, serperHits, biliHits, weiboHits, baiduHits] = await Promise.all([
-    searchTwitterByKeyword(keyword, 12),  // 最高优先级，配额最多
-    searchHackerNews(keyword, 5),
-    searchSerperByKeyword(keyword, 4),
-    searchBilibiliHits(keyword, 4),
-    searchWeiboHits(keyword, 4),
-    searchBaiduCNNews(keyword, 3),
+    searchTwitterByKeyword(orQuery, 12),  // 最高优先级，配额最多
+    searchWithExpansion(keyword, expandedTerms, 5, searchHackerNews, (h) => h.objectID || h.url || ''),
+    searchSerperByKeyword(orQuery, 4),
+    searchWithExpansion(keyword, expandedTerms, 4, searchBilibiliHits, (h) => h.url),
+    searchWithExpansion(keyword, expandedTerms, 4, searchWeiboHits, (h) => h.url),
+    searchBaiduCNNews(orQuery, 3),
   ]);
 
   const result: KeywordSearchResult = { keyword, count: 0, items: [] };
-  const kws = q.getActiveKeywords() as any[];
-  const kw = kws.find((k: any) => k.keyword === keyword);
 
-  // ── Twitter（最高优先级）──
-  for (const tweet of twHits) {
-    if (!isWithin7Days(tweet.createdAt)) continue;
-    const url = tweet.url || `https://twitter.com/i/web/status/${tweet.id}`;
-    const authorName = tweet.author?.userName ? `@${tweet.author.userName}` : '';
-    const title = `${authorName ? authorName + ': ' : ''}${tweet.text.slice(0, 120)}`;
-    const content = tweet.text;
+  // ── Twitter（最高优先级）── 先筛候选，再并发验证（带缓存），最后串行落库
+  {
+    const candidates = twHits.filter((t) => isWithin7Days(t.createdAt));
+    const verifications = await mapWithConcurrency(candidates, AI_VERIFY_CONCURRENCY, (tweet) =>
+      verifyWithCache(tweet.url || `https://twitter.com/i/web/status/${tweet.id}`, tweet.text, keyword)
+    );
 
-    let matched = false;
-    let confidence = 0;
-    let reason = 'twitter keyword match';
-    try {
-      const verification = await verifyKeywordMatch(content, keyword);
-      matched = verification.matched && verification.confidence >= 0.6;
-      confidence = verification.confidence;
-      reason = verification.reason || reason;
-    } catch {
-      matched = tweet.text.toLowerCase().includes(keyword.toLowerCase());
-      confidence = matched ? 0.7 : 0;
-    }
+    for (let i = 0; i < candidates.length; i++) {
+      const tweet = candidates[i];
+      const verification = verifications[i];
+      const url = tweet.url || `https://twitter.com/i/web/status/${tweet.id}`;
+      const authorName = tweet.author?.userName ? `@${tweet.author.userName}` : '';
+      const title = `${authorName ? authorName + ': ' : ''}${tweet.text.slice(0, 120)}`;
+      const matched = isMatched(verification);
+      const confidence = verification.confidence;
+      const reason = verification.reason || 'twitter keyword match';
 
-    if (matched) {
-      result.count++;
-      const insertResult = q.insertRawItem.run(
-        'Twitter/X Search', title.slice(0, 500), url,
-        tweet.text.slice(0, 2000), tweet.createdAt || new Date().toISOString()
-      );
-      if ((insertResult as any).changes > 0) {
-        try {
-          const topicInfo = q.insertHotTopic.run(
-            (insertResult as any).lastInsertRowid, title, url,
-            'Twitter/X Search', '',
-            Math.min(10, Math.round((tweet.likeCount || 0) / 50) + 4),
-            'discussion', tweet.createdAt || new Date().toISOString(),
-            tweet.author?.userName || '',
-            tweet.author?.followers || 0,
-            (tweet.author?.isBlueVerified || tweet.author?.isVerified) ? 1 : 0,
-            tweet.likeCount || 0,
-            tweet.replyCount || 0,
-            (tweet.retweetCount || 0) + (tweet.quoteCount || 0),
-            tweet.viewCount || 0,
-            '', 'unknown'
-          );
-          const topicId = topicInfo.lastInsertRowid as number;
-          if (kw && !q.checkDuplicateAlert(kw.id, topicId)) {
-            q.insertAlert.run(kw.id, keyword, topicId, title, url, confidence, reason);
-            await notifyAlert({ keyword, title, url, summary: '', confidence });
-          }
-        } catch { /* duplicate */ }
+      if (matched) {
+        result.count++;
+        const insertResult = q.insertRawItem.run(
+          'Twitter/X Search', title.slice(0, 500), url,
+          tweet.text.slice(0, 2000), tweet.createdAt || new Date().toISOString()
+        );
+        if ((insertResult as any).changes > 0) {
+          try {
+            const topicInfo = q.insertHotTopic.run(
+              (insertResult as any).lastInsertRowid, title, url,
+              'Twitter/X Search', '',
+              Math.min(10, Math.round((tweet.likeCount || 0) / 50) + 4),
+              'discussion', tweet.createdAt || new Date().toISOString(),
+              tweet.author?.userName || '',
+              tweet.author?.followers || 0,
+              (tweet.author?.isBlueVerified || tweet.author?.isVerified) ? 1 : 0,
+              tweet.likeCount || 0,
+              tweet.replyCount || 0,
+              (tweet.retweetCount || 0) + (tweet.quoteCount || 0),
+              tweet.viewCount || 0,
+              reason, 'unknown'
+            );
+            const topicId = topicInfo.lastInsertRowid as number;
+            if (kw && !q.checkDuplicateAlert(kw.id, topicId)) {
+              q.insertAlert.run(kw.id, keyword, topicId, title, url, confidence, reason);
+              await notifyAlert({ keyword, title, url, summary: '', confidence });
+            }
+          } catch { /* duplicate */ }
+        }
       }
-    }
 
-    result.items.push({
-      title, url,
-      source: `Twitter (${tweet.likeCount || 0}❤)`,
-      points: tweet.likeCount || 0, matched, confidence,
-    });
+      result.items.push({
+        title, url,
+        source: `Twitter (${tweet.likeCount || 0}❤)`,
+        points: tweet.likeCount || 0, matched, confidence,
+      });
+    }
   }
 
   // ── HackerNews ──
-  for (const hit of hnHits) {
-    if (!isWithin7Days(hit.created_at)) continue;
-    const url = hit.url || `https://news.ycombinator.com/item?id=${hit.objectID}`;
-    const content = `${hit.title}\n${hit.story_text || ''}`;
+  {
+    const candidates = hnHits.filter((h) => isWithin7Days(h.created_at));
+    const verifications = await mapWithConcurrency(candidates, AI_VERIFY_CONCURRENCY, (hit) =>
+      verifyWithCache(
+        hit.url || `https://news.ycombinator.com/item?id=${hit.objectID}`,
+        `${hit.title}\n${hit.story_text || ''}`,
+        keyword
+      )
+    );
 
-    let matched = false;
-    let confidence = 0;
-    let reason = 'keyword search match';
-    try {
-      const verification = await verifyKeywordMatch(content, keyword);
-      matched = verification.matched && verification.confidence >= 0.6;
-      confidence = verification.confidence;
-      reason = verification.reason || reason;
-    } catch {
-      matched = hit.title.toLowerCase().includes(keyword.toLowerCase());
-      confidence = matched ? 0.7 : 0;
-    }
+    for (let i = 0; i < candidates.length; i++) {
+      const hit = candidates[i];
+      const verification = verifications[i];
+      const url = hit.url || `https://news.ycombinator.com/item?id=${hit.objectID}`;
+      const matched = isMatched(verification);
+      const confidence = verification.confidence;
+      const reason = verification.reason || 'keyword search match';
 
-    if (matched) {
-      result.count++;
-      const insertResult = q.insertRawItem.run(
-        'HackerNews Search', hit.title.slice(0, 500), url,
-        (hit.story_text || '').slice(0, 2000), hit.created_at
-      );
-      if ((insertResult as any).changes > 0) {
-        try {
-          const topicInfo = q.insertHotTopic.run(
-            (insertResult as any).lastInsertRowid, hit.title, url,
-            'HackerNews Search', '',
-            Math.min(10, Math.round((hit.points || 0) / 20) + 4),
-            'discussion', hit.created_at,
-            hit.author || '', 0, 0,
-            hit.points || 0, hit.num_comments || 0, 0, 0,
-            '', 'unknown'
-          );
-          const topicId = topicInfo.lastInsertRowid as number;
-          if (kw && !q.checkDuplicateAlert(kw.id, topicId)) {
-            q.insertAlert.run(kw.id, keyword, topicId, hit.title, url, confidence, reason);
-            await notifyAlert({ keyword, title: hit.title, url, summary: '', confidence });
-          }
-        } catch { /* duplicate */ }
+      if (matched) {
+        result.count++;
+        const insertResult = q.insertRawItem.run(
+          'HackerNews Search', hit.title.slice(0, 500), url,
+          (hit.story_text || '').slice(0, 2000), hit.created_at
+        );
+        if ((insertResult as any).changes > 0) {
+          try {
+            const topicInfo = q.insertHotTopic.run(
+              (insertResult as any).lastInsertRowid, hit.title, url,
+              'HackerNews Search', '',
+              Math.min(10, Math.round((hit.points || 0) / 20) + 4),
+              'discussion', hit.created_at,
+              hit.author || '', 0, 0,
+              hit.points || 0, hit.num_comments || 0, 0, 0,
+              reason, 'unknown'
+            );
+            const topicId = topicInfo.lastInsertRowid as number;
+            if (kw && !q.checkDuplicateAlert(kw.id, topicId)) {
+              q.insertAlert.run(kw.id, keyword, topicId, hit.title, url, confidence, reason);
+              await notifyAlert({ keyword, title: hit.title, url, summary: '', confidence });
+            }
+          } catch { /* duplicate */ }
+        }
       }
-    }
 
-    result.items.push({
-      title: hit.title, url,
-      source: `HackerNews (${hit.points || 0}pts)`,
-      points: hit.points || 0, matched, confidence,
-    });
+      result.items.push({
+        title: hit.title, url,
+        source: `HackerNews (${hit.points || 0}pts)`,
+        points: hit.points || 0, matched, confidence,
+      });
+    }
   }
 
   // ── Google News (Serper) ──
-  for (const item of serperHits) {
-    if (!item.title || !item.link) continue;
-    let publishedAt = new Date().toISOString();
-    try { if (item.date) publishedAt = new Date(item.date).toISOString(); } catch { /* fallback */ }
-    if (!isWithin7Days(publishedAt)) continue;
-    const url = item.link;
-    const content = `${item.title}\n${item.snippet || ''}`;
-
-    let matched = false;
-    let confidence = 0;
-    let reason = 'google news keyword match';
-    try {
-      const verification = await verifyKeywordMatch(content, keyword);
-      matched = verification.matched && verification.confidence >= 0.6;
-      confidence = verification.confidence;
-      reason = verification.reason || reason;
-    } catch {
-      matched = item.title.toLowerCase().includes(keyword.toLowerCase());
-      confidence = matched ? 0.7 : 0;
+  {
+    const candidates: Array<{ item: SerperHit; url: string; publishedAt: string; content: string }> = [];
+    for (const item of serperHits) {
+      if (!item.title || !item.link) continue;
+      let publishedAt = new Date().toISOString();
+      try { if (item.date) publishedAt = new Date(item.date).toISOString(); } catch { /* fallback */ }
+      if (!isWithin7Days(publishedAt)) continue;
+      candidates.push({ item, url: item.link, publishedAt, content: `${item.title}\n${item.snippet || ''}` });
     }
+    const verifications = await mapWithConcurrency(candidates, AI_VERIFY_CONCURRENCY, (c) =>
+      verifyWithCache(c.url, c.content, keyword)
+    );
 
-    if (matched) {
-      result.count++;
-      const insertResult = q.insertRawItem.run(
-        'Google News', item.title.slice(0, 500), url,
-        (item.snippet || '').slice(0, 2000), publishedAt
-      );
-      if ((insertResult as any).changes > 0) {
-        try {
-          const topicInfo = q.insertHotTopic.run(
-            (insertResult as any).lastInsertRowid, item.title, url,
-            `Google News${item.source ? ' · ' + item.source : ''}`, '',
-            6, 'other', publishedAt,
-            '', 0, 0,
-            0, 0, 0, 0,
-            '', 'unknown'
-          );
-          const topicId = topicInfo.lastInsertRowid as number;
-          if (kw && !q.checkDuplicateAlert(kw.id, topicId)) {
-            q.insertAlert.run(kw.id, keyword, topicId, item.title, url, confidence, reason);
-            await notifyAlert({ keyword, title: item.title, url, summary: item.snippet || '', confidence });
-          }
-        } catch { /* duplicate */ }
+    for (let i = 0; i < candidates.length; i++) {
+      const { item, url, publishedAt } = candidates[i];
+      const verification = verifications[i];
+      const matched = isMatched(verification);
+      const confidence = verification.confidence;
+      const reason = verification.reason || 'google news keyword match';
+
+      if (matched) {
+        result.count++;
+        const insertResult = q.insertRawItem.run(
+          'Google News', item.title.slice(0, 500), url,
+          (item.snippet || '').slice(0, 2000), publishedAt
+        );
+        if ((insertResult as any).changes > 0) {
+          try {
+            const topicInfo = q.insertHotTopic.run(
+              (insertResult as any).lastInsertRowid, item.title, url,
+              `Google News${item.source ? ' · ' + item.source : ''}`, '',
+              6, 'other', publishedAt,
+              '', 0, 0,
+              0, 0, 0, 0,
+              reason, 'unknown'
+            );
+            const topicId = topicInfo.lastInsertRowid as number;
+            if (kw && !q.checkDuplicateAlert(kw.id, topicId)) {
+              q.insertAlert.run(kw.id, keyword, topicId, item.title, url, confidence, reason);
+              await notifyAlert({ keyword, title: item.title, url, summary: item.snippet || '', confidence });
+            }
+          } catch { /* duplicate */ }
+        }
       }
-    }
 
-    result.items.push({
-      title: item.title, url,
-      source: `Google News${item.source ? ' · ' + item.source : ''}`,
-      points: 0, matched, confidence,
-    });
+      result.items.push({
+        title: item.title, url,
+        source: `Google News${item.source ? ' · ' + item.source : ''}`,
+        points: 0, matched, confidence,
+      });
+    }
   }
 
-  // ── Bilibili ──
-  for (const hit of biliHits) {
-    if (!hit.title || !hit.url) continue;
-    if (!isWithin7Days(hit.publishedAt)) continue;
-    const matched = hit.isAccountMatch ? true
-      : hit.title.toLowerCase().includes(keyword.toLowerCase()) ||
-        hit.content.toLowerCase().includes(keyword.toLowerCase());
-    const confidence = hit.isAccountMatch ? 0.95 : (matched ? 0.75 : 0);
-    if (matched) {
-      result.count++;
-      await insertMatchedItem(
-        hit.source, hit.title, hit.url, hit.content, hit.publishedAt,
-        Math.min(10, Math.round((hit.play || 0) / 5000) + 4),
-        'tool-update', keyword, kw, confidence, 'bilibili match',
-        hit.authorName, hit.authorFollowers, hit.authorVerified,
-        0, (hit.danmaku || 0) + (hit.review || 0), 0, hit.play || 0
-      );
+  // ── Bilibili ── 命中目标账号无需 AI 复核，直接给高置信度结果，与普通候选一并并发处理
+  {
+    const candidates = biliHits.filter((h) => h.title && h.url && isWithin7Days(h.publishedAt));
+    const verifications = await mapWithConcurrency(candidates, AI_VERIFY_CONCURRENCY, (hit) =>
+      hit.isAccountMatch
+        ? Promise.resolve<KeywordVerifyResult>({ matched: true, confidence: 0.95, reason: '命中目标账号' })
+        : verifyWithCache(hit.url, `${hit.title}\n${hit.content}`, keyword)
+    );
+
+    for (let i = 0; i < candidates.length; i++) {
+      const hit = candidates[i];
+      const verification = verifications[i];
+      const matched = isMatched(verification);
+      const confidence = verification.confidence;
+      const reason = verification.reason || 'bilibili match';
+
+      if (matched) {
+        result.count++;
+        await insertMatchedItem(
+          hit.source, hit.title, hit.url, hit.content, hit.publishedAt,
+          Math.min(10, Math.round((hit.play || 0) / 5000) + 4),
+          'tool-update', keyword, kw, confidence, reason,
+          hit.authorName, hit.authorFollowers, hit.authorVerified,
+          0, (hit.danmaku || 0) + (hit.review || 0), 0, hit.play || 0
+        );
+      }
+      result.items.push({ title: hit.title, url: hit.url, source: hit.source, points: hit.play, matched, confidence });
     }
-    result.items.push({ title: hit.title, url: hit.url, source: hit.source, points: hit.play, matched, confidence });
   }
 
   // ── 微博 ──
-  for (const hit of weiboHits) {
-    if (!hit.title || !hit.url) continue;
-    if (!isWithin7Days(hit.publishedAt)) continue;
-    const matched = hit.isAccountMatch ? true
-      : hit.content.toLowerCase().includes(keyword.toLowerCase());
-    const confidence = hit.isAccountMatch ? 0.95 : (matched ? 0.7 : 0);
-    if (matched) {
-      result.count++;
-      await insertMatchedItem(
-        hit.source, hit.title, hit.url, hit.content, hit.publishedAt,
-        Math.min(10, Math.round((hit.likesCount || 0) / 100) + 4),
-        'discussion', keyword, kw, confidence, 'weibo match',
-        hit.authorName, hit.authorFollowers, hit.authorVerified,
-        hit.likesCount || 0, hit.commentsCount || 0, hit.repostsCount || 0, 0
-      );
+  {
+    const candidates = weiboHits.filter((h) => h.title && h.url && isWithin7Days(h.publishedAt));
+    const verifications = await mapWithConcurrency(candidates, AI_VERIFY_CONCURRENCY, (hit) =>
+      hit.isAccountMatch
+        ? Promise.resolve<KeywordVerifyResult>({ matched: true, confidence: 0.95, reason: '命中目标账号' })
+        : verifyWithCache(hit.url, hit.content, keyword)
+    );
+
+    for (let i = 0; i < candidates.length; i++) {
+      const hit = candidates[i];
+      const verification = verifications[i];
+      const matched = isMatched(verification);
+      const confidence = verification.confidence;
+      const reason = verification.reason || 'weibo match';
+
+      if (matched) {
+        result.count++;
+        await insertMatchedItem(
+          hit.source, hit.title, hit.url, hit.content, hit.publishedAt,
+          Math.min(10, Math.round((hit.likesCount || 0) / 100) + 4),
+          'discussion', keyword, kw, confidence, reason,
+          hit.authorName, hit.authorFollowers, hit.authorVerified,
+          hit.likesCount || 0, hit.commentsCount || 0, hit.repostsCount || 0, 0
+        );
+      }
+      result.items.push({ title: hit.title, url: hit.url, source: hit.source, points: hit.likesCount, matched, confidence });
     }
-    result.items.push({ title: hit.title, url: hit.url, source: hit.source, points: hit.likesCount, matched, confidence });
   }
 
   // ── 百度中文新闻 ──
-  for (const item of baiduHits) {
-    if (!item.title || !item.link) continue;
-    let publishedAt = new Date().toISOString();
-    try { if (item.date) publishedAt = new Date(item.date).toISOString(); } catch { /* */ }
-    if (!isWithin7Days(publishedAt)) continue;
-    const content = `${item.title}\n${item.snippet || ''}`;
-    let matched = false;
-    let confidence = 0;
-    let reason = 'baidu news match';
-    try {
-      const v = await verifyKeywordMatch(content, keyword);
-      matched = v.matched && v.confidence >= 0.6;
-      confidence = v.confidence;
-      reason = v.reason || reason;
-    } catch {
-      matched = item.title.toLowerCase().includes(keyword.toLowerCase());
-      confidence = matched ? 0.7 : 0;
+  {
+    const candidates: Array<{ item: SerperHit; publishedAt: string; content: string }> = [];
+    for (const item of baiduHits) {
+      if (!item.title || !item.link) continue;
+      let publishedAt = new Date().toISOString();
+      try { if (item.date) publishedAt = new Date(item.date).toISOString(); } catch { /* */ }
+      if (!isWithin7Days(publishedAt)) continue;
+      candidates.push({ item, publishedAt, content: `${item.title}\n${item.snippet || ''}` });
     }
-    if (matched) {
-      result.count++;
-      await insertMatchedItem(
-        `百度新闻${item.source ? ' · ' + item.source : ''}`,
-        item.title, item.link, item.snippet || '', publishedAt,
-        6, 'other', keyword, kw, confidence, reason
-      );
+    const verifications = await mapWithConcurrency(candidates, AI_VERIFY_CONCURRENCY, (c) =>
+      verifyWithCache(c.item.link, c.content, keyword)
+    );
+
+    for (let i = 0; i < candidates.length; i++) {
+      const { item, publishedAt } = candidates[i];
+      const verification = verifications[i];
+      const matched = isMatched(verification);
+      const confidence = verification.confidence;
+      const reason = verification.reason || 'baidu news match';
+
+      if (matched) {
+        result.count++;
+        await insertMatchedItem(
+          `百度新闻${item.source ? ' · ' + item.source : ''}`,
+          item.title, item.link, item.snippet || '', publishedAt,
+          6, 'other', keyword, kw, confidence, reason
+        );
+      }
+      result.items.push({
+        title: item.title, url: item.link,
+        source: `百度新闻${item.source ? ' · ' + item.source : ''}`,
+        points: 0, matched, confidence,
+      });
     }
-    result.items.push({
-      title: item.title, url: item.link,
-      source: `百度新闻${item.source ? ' · ' + item.source : ''}`,
-      points: 0, matched, confidence,
-    });
   }
 
   return result;

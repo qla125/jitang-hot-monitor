@@ -7,9 +7,11 @@ export const keywordsApi = {
   getAll: () => api.get<Keyword[]>('/keywords'),
   create: (data: { keyword: string; description?: string }) =>
     api.post<Keyword>('/keywords', data),
-  update: (id: number, data: Partial<Keyword>) =>
+  update: (id: number, data: Partial<Omit<Keyword, 'expanded_terms'>> & { expanded_terms?: string[] }) =>
     api.put<Keyword>(`/keywords/${id}`, data),
   remove: (id: number) => api.delete(`/keywords/${id}`),
+  // 重新生成扩展词（AI 批量改写关键词的同义/别名说法，用于扩大检索召回范围）
+  regenerateExpansion: (id: number) => api.post<Keyword>(`/keywords/${id}/expand`),
 }
 
 export const topicsApi = {

@@ -1,9 +1,27 @@
 import { q, db } from '../db';
 import { analyzeItems } from './ai';
-import { verifyKeywordMatch } from './ai';
+import { verifyWithCache } from './ai';
 import { notifyAlert } from './notify';
 
 const BATCH_SIZE = 10;
+const MATCH_CONFIDENCE_THRESHOLD = 0.7;
+
+function parseExpandedTerms(raw: unknown): string[] {
+  if (typeof raw !== 'string' || !raw.trim()) return [];
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.filter((t): t is string => typeof t === 'string' && t.trim().length > 0) : [];
+  } catch {
+    return [];
+  }
+}
+
+// 预筛选：内容只要命中关键词本身或任一扩展词即可进入 AI 复核，避免严格子串匹配漏掉语义相关内容
+function matchesAnyTerm(content: string, kw: any): boolean {
+  const lower = content.toLowerCase();
+  const terms = [kw.keyword, ...parseExpandedTerms(kw.expanded_terms)];
+  return terms.some((t) => lower.includes(String(t).toLowerCase()));
+}
 
 export async function processNewItems(): Promise<number> {
   const unprocessed = q.getUnprocessedItems() as any[];
@@ -99,12 +117,12 @@ export async function recheckRecentTopics(): Promise<number> {
     const content = `${topic.title}\n${topic.content || ''}`;
 
     for (const kw of keywords) {
-      if (!content.toLowerCase().includes(kw.keyword.toLowerCase())) continue;
+      if (!matchesAnyTerm(content, kw)) continue;
       if (q.checkDuplicateAlert(kw.id, topic.topicId)) continue;
 
       try {
-        const verification = await verifyKeywordMatch(content, kw.keyword);
-        if (verification.matched && verification.confidence >= 0.65) {
+        const verification = await verifyWithCache(topic.url || '', content, kw.keyword);
+        if (verification.matched && verification.confidence >= MATCH_CONFIDENCE_THRESHOLD) {
           q.insertAlert.run(
             kw.id, kw.keyword, topic.topicId,
             topic.title, topic.url || '',
@@ -140,16 +158,16 @@ async function checkKeywordMatches(
     const content = `${rawItem.title}\n${rawItem.content || ''}`;
 
     for (const kw of keywords) {
-      // Quick text filter to save AI calls
-      if (!content.toLowerCase().includes(kw.keyword.toLowerCase())) continue;
+      // 预筛选：命中关键词或扩展词才进入 AI 复核，节省调用次数
+      if (!matchesAnyTerm(content, kw)) continue;
 
       // Dedup check
       if (q.checkDuplicateAlert(kw.id, topicId)) continue;
 
       try {
-        const verification = await verifyKeywordMatch(content, kw.keyword);
+        const verification = await verifyWithCache(rawItem.url || '', content, kw.keyword);
 
-        if (verification.matched && verification.confidence >= 0.65) {
+        if (verification.matched && verification.confidence >= MATCH_CONFIDENCE_THRESHOLD) {
           q.insertAlert.run(
             kw.id,
             kw.keyword,
