@@ -21,13 +21,13 @@
 ### 安装到当前项目
 
 ```bash
-npx skills add ./agent-skills/hot-monitor -y
+npx skills add ./hot-monitor-skills/hot-monitor -y
 ```
 
 ### 安装到全局（所有项目可用）
 
 ```bash
-npx skills add ./agent-skills/hot-monitor -g -y
+npx skills add ./hot-monitor-skills/hot-monitor -g -y
 ```
 
 安装后在 Claude Code 中直接使用 `/hot-monitor` 即可。
@@ -47,7 +47,7 @@ npx skills add ./agent-skills/hot-monitor -g -y
 ## 目录结构
 
 ```
-agent-skills/
+hot-monitor-skills/
 ├── hot-monitor/
 │   └── SKILL.md          ← 技能主文件（三种模式统一入口）
 ├── references/
