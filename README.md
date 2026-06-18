@@ -248,7 +248,7 @@ hot-monitor-skills/
         └── requirements.txt
 ```
 
-> **注意**：Agent Skills 是 Claude Code 专属功能，需在 Claude Code CLI / VSCode 扩展中使用，Cursor 等其他 AI 编辑器不支持。
+> **安装说明**：`/hot-monitor` 命令语法原生支持 Claude Code；在 Cursor 等其他 AI 编辑器中，可将 `SKILL.md` 作为上下文引入，AI 同样能按照指令执行完整流程。
 
 ## License
 
