@@ -203,9 +203,9 @@ jitang-hot-monitor/
 | GET/PUT | `/api/settings` | 配置管理 |
 | GET | `/events` | SSE 实时推送 |
 
-## Agent Skills（Claude Code 技能包）
+## Agent Skills（AI 编辑器技能包）
 
-极客雷达附带一套独立的 **Claude Code Agent Skill**，无需启动本地服务即可直接在 Claude Code 中搜索热点、获取日报、制定监控策略。
+极客雷达附带一套独立的 **Agent Skill**，无需启动本地服务即可在支持 Agent Skills 的 AI 编辑器（Claude Code、Cursor 等）中搜索热点、获取日报、制定监控策略。
 
 ### 快速安装
 
@@ -217,7 +217,7 @@ npx skills add ./hot-monitor-skills/hot-monitor -y
 npx skills add ./hot-monitor-skills/hot-monitor -g -y
 ```
 
-安装后在 Claude Code 中直接使用 `/hot-monitor` 命令。
+安装后直接使用 `/hot-monitor` 命令。
 
 ### 三种模式
 
