@@ -203,6 +203,53 @@ jitang-hot-monitor/
 | GET/PUT | `/api/settings` | 配置管理 |
 | GET | `/events` | SSE 实时推送 |
 
+## Agent Skills（Claude Code 技能包）
+
+极客雷达附带一套独立的 **Claude Code Agent Skill**，无需启动本地服务即可直接在 Claude Code 中搜索热点、获取日报、制定监控策略。
+
+### 快速安装
+
+```bash
+# 安装到当前项目
+npx skills add ./hot-monitor-skills/hot-monitor -y
+
+# 安装到全局（所有项目可用）
+npx skills add ./hot-monitor-skills/hot-monitor -g -y
+```
+
+安装后在 Claude Code 中直接使用 `/hot-monitor` 命令。
+
+### 三种模式
+
+| 命令 | 模式 | 说明 |
+|------|------|------|
+| `/hot-monitor <关键词>` | **Scan** | 立即搜索该关键词的最新热点，AI 验证相关性后输出命中内容 |
+| `/hot-monitor` 或 `/hot-monitor digest [N小时]` | **Digest** | 今日 AI/科技热点日报（默认过去 24 小时，按类别分组） |
+| `/hot-monitor watch <关键词>` | **Watch** | 深度分析：生成扩展词 + 多源搜索 + 监控策略建议 |
+
+### 设计原则
+
+- **完全自包含**：不依赖本地 server、不需要数据库，AI 本身就是处理引擎
+- **无必填 Key**：默认仅用 HackerNews 免费 API；设置 `SERPER_API_KEY` 可额外开启 Google News 搜索
+- **宁缺毋滥**：相关性验证 confidence ≥ 0.7 才保留，严格过滤误报
+- **单一入口**：一个命令自动识别意图，路由到对应模式
+
+### Skill 目录结构
+
+```
+hot-monitor-skills/
+└── hot-monitor/
+    ├── SKILL.md               ← 技能主文件（三种模式统一入口）
+    ├── references/
+    │   ├── search-sources.md  ← 各搜索源 API 文档
+    │   └── relevance-guide.md ← 相关性判断准则
+    └── scripts/
+        ├── search_china.py    ← B 站 + 微博搜索脚本（可选）
+        └── requirements.txt
+```
+
+> **注意**：Agent Skills 是 Claude Code 专属功能，需在 Claude Code CLI / VSCode 扩展中使用，Cursor 等其他 AI 编辑器不支持。
+
 ## License
 
 MIT
