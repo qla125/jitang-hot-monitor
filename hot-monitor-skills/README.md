@@ -48,14 +48,14 @@ npx skills add ./hot-monitor-skills/hot-monitor -g -y
 
 ```
 hot-monitor-skills/
-├── hot-monitor/
-│   └── SKILL.md          ← 技能主文件（三种模式统一入口）
-├── references/
-│   ├── search-sources.md ← 各搜索源 API 文档
-│   └── relevance-guide.md← 宁缺毋滥相关性判断准则
-└── scripts/
-    ├── search_china.py   ← B 站 + 微博搜索脚本（可选增强）
-    └── requirements.txt
+└── hot-monitor/               ← 直接复制此文件夹到 skills 目录即可安装
+    ├── SKILL.md               ← 技能主文件（三种模式统一入口）
+    ├── references/
+    │   ├── search-sources.md  ← 各搜索源 API 文档
+    │   └── relevance-guide.md ← 宁缺毋滥相关性判断准则
+    └── scripts/
+        ├── search_china.py    ← B 站 + 微博搜索脚本（可选增强）
+        └── requirements.txt
 ```
 
 ---
